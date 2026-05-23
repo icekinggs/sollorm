@@ -59,18 +59,26 @@ func (p *Program) Stop(s ksvc.Service) error {
 
 func (p *Program) run(ctx context.Context) {
 	defer close(p.done)
+	log.Println(">>> run() iniciado")
 
 	// Envio inicial de system info
-	if info, err := system.CollectInfo(); err == nil {
-		log.Printf("Enviando system info: %s (%s) - %d cores", info.Hostname, info.Platform, info.CPUCores)
-		if err := p.Reporter.SendSystemInfo(ctx, info); err != nil {
-			log.Printf("Erro ao enviar system info inicial: %v", err)
-		}
+	log.Println(">>> Coletando system info...")
+	info, err := system.CollectInfo()
+	if err != nil {
+		log.Printf(">>> ERRO ao coletar system info: %v", err)
 	} else {
-		log.Printf("Erro ao coletar system info: %v", err)
+		log.Printf(">>> System info coletado: %s (%s) - %d cores, %d MB RAM",
+			info.Hostname, info.Platform, info.CPUCores, info.RAMTotal/1024/1024)
+		log.Println(">>> Enviando system info pro backend...")
+		if err := p.Reporter.SendSystemInfo(ctx, info); err != nil {
+			log.Printf(">>> ERRO ao enviar system info: %v", err)
+		} else {
+			log.Println(">>> System info enviado COM SUCESSO!")
+		}
 	}
 
 	// Primeiro heartbeat imediato
+	log.Println(">>> Enviando primeiro heartbeat...")
 	p.sendHeartbeat(ctx)
 
 	heartbeatTicker := time.NewTicker(HeartbeatInterval)
@@ -81,15 +89,17 @@ func (p *Program) run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			log.Println(">>> Contexto cancelado, parando run()")
 			return
 
 		case <-heartbeatTicker.C:
 			p.sendHeartbeat(ctx)
 
 		case <-systemInfoTicker.C:
+			log.Println(">>> Tick de system info...")
 			if info, err := system.CollectInfo(); err == nil {
 				if err := p.Reporter.SendSystemInfo(ctx, info); err != nil {
-					log.Printf("Erro ao enviar system info: %v", err)
+					log.Printf(">>> ERRO ao enviar system info: %v", err)
 				}
 			}
 		}
