@@ -18,6 +18,9 @@ import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
 import { useConfirm } from 'primevue/useconfirm'
 import ConfirmDialog from 'primevue/confirmdialog'
+import Select from 'primevue/select'
+import Textarea from 'primevue/textarea'
+import InputNumber from 'primevue/inputnumber'
 
 const props = defineProps({
   id: { type: String, required: true }
@@ -30,19 +33,34 @@ const deleting = ref(false)
 
 const agent = ref(null)
 const heartbeats = ref([])
+const executions = ref([])
 const loading = ref(true)
 const refreshInterval = ref(null)
+const executing = ref(false)
+const scriptForm = ref({
+  language: 'bash',
+  script: 'hostname\nwhoami',
+  timeout_seconds: 60
+})
+
+const scriptLanguages = [
+  { label: 'Bash', value: 'bash' },
+  { label: 'PowerShell', value: 'powershell' },
+  { label: 'Python', value: 'python' }
+]
 
 const lastHeartbeat = computed(() => heartbeats.value[0] || null)
 
 async function loadData() {
   try {
-    const [agentRes, hbRes] = await Promise.all([
+    const [agentRes, hbRes, execRes] = await Promise.all([
       agentsApi.get(props.id),
-      agentsApi.heartbeats(props.id, 20)
+      agentsApi.heartbeats(props.id, 20),
+      agentsApi.executions(props.id, 20)
     ])
     agent.value = agentRes.data
     heartbeats.value = hbRes.data
+    executions.value = execRes.data
   } catch (err) {
     if (err.response?.status === 404) {
       toast.add({
@@ -62,6 +80,50 @@ async function loadData() {
     }
   } finally {
     loading.value = false
+  }
+}
+
+function executionSeverity(status) {
+  if (status === 'succeeded') return 'success'
+  if (status === 'running') return 'info'
+  if (status === 'pending' || status === 'queued') return 'warn'
+  return 'danger'
+}
+
+async function runScript() {
+  if (!scriptForm.value.script.trim()) {
+    toast.add({
+      severity: 'warn',
+      summary: 'Script vazio',
+      detail: 'Digite um script para executar',
+      life: 3000
+    })
+    return
+  }
+
+  executing.value = true
+  try {
+    await agentsApi.createExecution(props.id, {
+      language: scriptForm.value.language,
+      script: scriptForm.value.script,
+      timeout_seconds: scriptForm.value.timeout_seconds
+    })
+    toast.add({
+      severity: 'success',
+      summary: 'Execução criada',
+      detail: 'O comando foi enviado para o agente',
+      life: 3000
+    })
+    await loadData()
+  } catch (err) {
+    toast.add({
+      severity: 'error',
+      summary: 'Erro',
+      detail: err.response?.data?.detail || 'Falha ao executar script',
+      life: 4000
+    })
+  } finally {
+    executing.value = false
   }
 }
 
@@ -241,6 +303,83 @@ onUnmounted(() => {
       </div>
 
       <div class="card full-width">
+        <h3>Execução remota</h3>
+        <div class="script-runner">
+          <div class="script-toolbar">
+            <Select
+              v-model="scriptForm.language"
+              :options="scriptLanguages"
+              option-label="label"
+              option-value="value"
+              class="language-select"
+            />
+            <InputNumber
+              v-model="scriptForm.timeout_seconds"
+              :min="1"
+              :max="3600"
+              suffix="s"
+              show-buttons
+              class="timeout-input"
+            />
+            <Button
+              label="Executar"
+              icon="pi pi-play"
+              :loading="executing"
+              @click="runScript"
+            />
+          </div>
+          <Textarea
+            v-model="scriptForm.script"
+            rows="8"
+            auto-resize
+            class="script-editor mono"
+          />
+        </div>
+      </div>
+
+      <div class="card full-width">
+        <h3>Histórico de execuções</h3>
+        <DataTable
+          :value="executions"
+          :rows="20"
+          striped-rows
+          class="execution-table"
+        >
+          <Column field="created_at" header="Criado em" style="width: 190px">
+            <template #body="{ data }">
+              {{ formatDateTime(data.created_at) }}
+            </template>
+          </Column>
+          <Column field="language" header="Tipo" style="width: 120px">
+            <template #body="{ data }">
+              <code class="mono">{{ data.language }}</code>
+            </template>
+          </Column>
+          <Column field="status" header="Status" style="width: 130px">
+            <template #body="{ data }">
+              <Tag :value="data.status" :severity="executionSeverity(data.status)" />
+            </template>
+          </Column>
+          <Column field="exit_code" header="Exit" style="width: 80px">
+            <template #body="{ data }">
+              {{ data.exit_code ?? '—' }}
+            </template>
+          </Column>
+          <Column header="Saída">
+            <template #body="{ data }">
+              <div class="execution-output">
+                <pre v-if="data.stdout" class="mono">{{ data.stdout }}</pre>
+                <pre v-if="data.stderr" class="mono stderr">{{ data.stderr }}</pre>
+                <span v-if="!data.stdout && !data.stderr" class="text-muted">
+                  {{ data.error_message || 'Sem saída ainda' }}
+                </span>
+              </div>
+            </template>
+          </Column>
+        </DataTable>
+      </div>
+
+      <div class="card full-width">
         <h3>Histórico recente de heartbeats</h3>
         <DataTable
           :value="heartbeats"
@@ -373,9 +512,63 @@ onUnmounted(() => {
   font-size: 0.8rem;
 }
 
+.script-runner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.script-toolbar {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.language-select {
+  width: 160px;
+}
+
+.timeout-input {
+  width: 140px;
+}
+
+.script-editor {
+  width: 100%;
+}
+
+.script-editor :deep(textarea) {
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  font-size: 0.85rem;
+}
+
+.execution-output {
+  max-height: 180px;
+  overflow: auto;
+}
+
+.execution-output pre {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.execution-output .stderr {
+  color: var(--p-red-500);
+  margin-top: 0.5rem;
+}
+
 @media (max-width: 768px) {
   .content-grid {
     grid-template-columns: 1fr;
+  }
+
+  .script-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .language-select,
+  .timeout-input {
+    width: 100%;
   }
 }
 </style>

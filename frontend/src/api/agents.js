@@ -15,5 +15,13 @@ export const agentsApi = {
 
   delete(id) {
     return api.delete(`/agents/${id}`)
+  },
+
+  executions(id, limit = 50) {
+    return api.get(`/agents/${id}/executions`, { params: { limit } })
+  },
+
+  createExecution(id, payload) {
+    return api.post(`/agents/${id}/executions`, payload)
   }
 }

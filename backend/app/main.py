@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import Base, engine
-from app.routers import agent_tokens, agents, auth, install
+from app.routers import agent_tokens, agents, auth, install, script_executions
 
 
 @asynccontextmanager
@@ -19,7 +19,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="SolloRMM API",
     description="API do sistema próprio de RMM",
-    version="0.3.0",
+    version="0.4.0",
     lifespan=lifespan,
 )
 
@@ -35,6 +35,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix=settings.api_v1_prefix)
 app.include_router(agents.router, prefix=settings.api_v1_prefix)
 app.include_router(agent_tokens.router, prefix=settings.api_v1_prefix)
+app.include_router(script_executions.router, prefix=settings.api_v1_prefix)
 
 # Router público - serve scripts de instalação
 app.include_router(install.router)
@@ -42,7 +43,7 @@ app.include_router(install.router)
 
 @app.get("/")
 async def root():
-    return {"name": "SolloRMM API", "version": "0.3.0", "status": "ok"}
+    return {"name": "SolloRMM API", "version": "0.4.0", "status": "ok"}
 
 
 @app.get("/health")

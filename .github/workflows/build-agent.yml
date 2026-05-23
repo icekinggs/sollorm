@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Versão (ex: v0.3.0)'
+        description: 'Versão (ex: v0.4.0)'
         required: true
         type: string
 

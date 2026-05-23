@@ -50,7 +50,7 @@ services:
       AGENT_MASTER_TOKEN: ${AGENT_MASTER_TOKEN:-mude_este_token_imediatamente}
       PUBLIC_BACKEND_URL: ${PUBLIC_BACKEND_URL:-http://localhost:8000}
       GITHUB_REPO: ${GITHUB_REPO:-icekinggs/sollorm}
-      AGENT_CURRENT_VERSION: ${AGENT_CURRENT_VERSION:-v0.3.0}
+      AGENT_CURRENT_VERSION: ${AGENT_CURRENT_VERSION:-v0.4.0}
       ALLOW_LEGACY_MASTER_TOKEN: ${ALLOW_LEGACY_MASTER_TOKEN:-true}
     ports:
       - "8000:8000"

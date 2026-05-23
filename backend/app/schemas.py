@@ -106,6 +106,7 @@ class UserCreate(BaseModel):
 # ---------- Agent Tokens ----------
 
 PlatformLiteral = Literal["windows", "linux", "darwin"]
+ScriptLanguageLiteral = Literal["powershell", "bash", "python"]
 
 
 class AgentTokenCreate(BaseModel):
@@ -148,6 +149,35 @@ class AgentTokenCreatedResponse(BaseModel):
     install_command_oneliner: str = Field(description="Comando one-liner para colar na máquina-alvo")
     install_script_url: str
     expires_at: datetime | None
+
+
+# ---------- Remote Script Execution ----------
+
+
+class ScriptExecutionCreate(BaseModel):
+    language: ScriptLanguageLiteral
+    script: str = Field(min_length=1, max_length=200_000)
+    timeout_seconds: int = Field(default=60, ge=1, le=3600)
+
+
+class ScriptExecutionOut(BaseModel):
+    id: str
+    agent_id: str
+    created_by_user_id: str
+    language: str
+    script: str
+    timeout_seconds: int
+    status: str
+    stdout: str | None
+    stderr: str | None
+    exit_code: int | None
+    error_message: str | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+
+    class Config:
+        from_attributes = True
 
 
 TokenResponse.model_rebuild()

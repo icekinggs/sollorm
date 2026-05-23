@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -129,6 +129,9 @@ class Agent(Base):
     heartbeats: Mapped[list["Heartbeat"]] = relationship(
         back_populates="agent", cascade="all, delete-orphan"
     )
+    script_executions: Mapped[list["ScriptExecution"]] = relationship(
+        back_populates="agent", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<Agent {self.hostname} ({self.id[:8]})>"
@@ -153,3 +156,36 @@ class Heartbeat(Base):
     reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
     agent: Mapped["Agent"] = relationship(back_populates="heartbeats")
+
+
+class ScriptExecution(Base):
+    __tablename__ = "script_executions"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    agent_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("agents.id", ondelete="CASCADE"), index=True
+    )
+    created_by_user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id"), index=True
+    )
+
+    language: Mapped[str] = mapped_column(String(20))
+    script: Mapped[str] = mapped_column(Text)
+    timeout_seconds: Mapped[int] = mapped_column(Integer, default=60)
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+
+    stdout: Mapped[str | None] = mapped_column(Text)
+    stderr: Mapped[str | None] = mapped_column(Text)
+    exit_code: Mapped[int | None] = mapped_column(Integer)
+    error_message: Mapped[str | None] = mapped_column(Text)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    agent: Mapped["Agent"] = relationship(back_populates="script_executions")
+    created_by: Mapped["User"] = relationship(foreign_keys=[created_by_user_id])

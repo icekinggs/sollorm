@@ -9,6 +9,7 @@ import (
 
 	ksvc "github.com/kardianos/service"
 
+	"sollorm-agent/internal/commands"
 	"sollorm-agent/internal/reporter"
 	"sollorm-agent/internal/system"
 )
@@ -80,6 +81,13 @@ func (p *Program) run(ctx context.Context) {
 	// Primeiro heartbeat imediato
 	log.Println(">>> Enviando primeiro heartbeat...")
 	p.sendHeartbeat(ctx)
+
+	commandClient := commands.NewClient(
+		p.Reporter.ServerURL(),
+		p.Reporter.Token(),
+		p.Reporter.AgentID(),
+	)
+	go commandClient.Run(ctx)
 
 	heartbeatTicker := time.NewTicker(HeartbeatInterval)
 	systemInfoTicker := time.NewTicker(SystemInfoInterval)

@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     github_repo: str = "icekinggs/sollorm"
 
     # Versão atual recomendada (atualize quando publicar nova release)
-    agent_current_version: str = "v0.3.0"
+    agent_current_version: str = "v0.4.0"
 
 
 settings = Settings()

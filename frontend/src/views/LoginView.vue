@@ -108,7 +108,7 @@ async function handleSubmit() {
       </form>
 
       <p class="login-footer text-muted">
-        SolloRMM v0.2 · Em desenvolvimento
+        SolloRMM v0.4 · Em desenvolvimento
       </p>
     </div>
   </div>

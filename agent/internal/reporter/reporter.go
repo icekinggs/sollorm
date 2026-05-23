@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	AgentVersion = "0.3.0"
+	AgentVersion = "0.4.0"
 	httpTimeout  = 30 * time.Second
 )
 
@@ -32,6 +32,18 @@ func New(serverURL, token, agentID string) *Reporter {
 		agentID:   agentID,
 		client:    &http.Client{Timeout: httpTimeout},
 	}
+}
+
+func (r *Reporter) ServerURL() string {
+	return r.serverURL
+}
+
+func (r *Reporter) Token() string {
+	return r.token
+}
+
+func (r *Reporter) AgentID() string {
+	return r.agentID
 }
 
 type systemInfoPayload struct {
