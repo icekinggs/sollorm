@@ -2,20 +2,17 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Dependências do sistema (necessárias para alguns pacotes Python)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Instala dependências Python primeiro (cache de build)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia código da aplicação
 COPY app/ ./app/
+COPY scripts/ ./scripts/
 
-# Usuário não-root por segurança
 RUN useradd -m -u 1000 sollorm && chown -R sollorm:sollorm /app
 USER sollorm
 

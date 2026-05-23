@@ -1,0 +1,109 @@
+# ============================================
+# SolloRMM - .gitignore
+# ============================================
+
+# ===== Secrets e configs locais =====
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.crt
+deploy/.env
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+venv/
+.venv/
+env/
+ENV/
+
+# ===== Go =====
+# Binários compilados do agente
+agent/sollorm-agent
+agent/sollorm-agent.exe
+agent/sollorm-agent-*
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# ID gerado pelo agente em runtime (único por máquina)
+agent/agent_id.txt
+agent_id.txt
+
+# Vendor (opcional - se quiser commitar, remova esta linha)
+agent/vendor/
+
+# ===== Node.js / Frontend (futuro) =====
+frontend/node_modules/
+frontend/dist/
+frontend/.nuxt/
+frontend/.output/
+frontend/.cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ===== Docker =====
+# Não ignoramos docker-compose.yml, só dados locais
+deploy/postgres-data/
+deploy/redis-data/
+
+# ===== IDEs / Editores =====
+.vscode/
+!.vscode/settings.json.example
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.sublime-project
+*.sublime-workspace
+
+# ===== Logs =====
+*.log
+logs/
+
+# ===== Banco de dados local =====
+*.sqlite
+*.sqlite3
+*.db
+
+# ===== Outros =====
+.cache/
+tmp/
+temp/

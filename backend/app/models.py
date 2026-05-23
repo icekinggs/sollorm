@@ -1,11 +1,36 @@
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Integer, String, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+
+class User(Base):
+    """Usuários humanos do sistema (admin, técnicos)."""
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    username: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    full_name: Mapped[str | None] = mapped_column(String(255))
+    password_hash: Mapped[str] = mapped_column(String(255))
+
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_superuser: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    def __repr__(self) -> str:
+        return f"<User {self.username}>"
 
 
 class Agent(Base):
@@ -17,30 +42,25 @@ class Agent(Base):
         UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
     )
 
-    # Informações de identificação
     hostname: Mapped[str] = mapped_column(String(255), index=True)
     os: Mapped[str | None] = mapped_column(String(50))
     platform: Mapped[str | None] = mapped_column(String(255))
     architecture: Mapped[str | None] = mapped_column(String(20))
     kernel_arch: Mapped[str | None] = mapped_column(String(20))
 
-    # Hardware
     cpu_model: Mapped[str | None] = mapped_column(String(255))
     cpu_cores: Mapped[int | None] = mapped_column(Integer)
     ram_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
     disk_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
 
-    # Versão do agente
     agent_version: Mapped[str | None] = mapped_column(String(20))
 
-    # Timestamps
     first_seen: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
     last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_system_info: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    # Relação com heartbeats
     heartbeats: Mapped[list["Heartbeat"]] = relationship(
         back_populates="agent", cascade="all, delete-orphan"
     )

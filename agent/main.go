@@ -20,12 +20,11 @@ import (
 )
 
 const (
-	agentVersion       = "0.1.0"
+	agentVersion       = "0.2.0"
 	heartbeatInterval  = 60 * time.Second
 	systemInfoInterval = 30 * time.Minute
 )
 
-// SystemInfo representa as informações coletadas do endpoint
 type SystemInfo struct {
 	AgentID      string    `json:"agent_id"`
 	Hostname     string    `json:"hostname"`
@@ -42,18 +41,16 @@ type SystemInfo struct {
 	Timestamp    time.Time `json:"timestamp"`
 }
 
-// Heartbeat representa um sinal de vida do agente
 type Heartbeat struct {
-	AgentID     string    `json:"agent_id"`
-	Hostname    string    `json:"hostname"`
-	CPUUsage    float64   `json:"cpu_usage_percent"`
-	RAMUsage    float64   `json:"ram_usage_percent"`
-	DiskUsage   float64   `json:"disk_usage_percent"`
-	Uptime      uint64    `json:"uptime_seconds"`
-	Timestamp   time.Time `json:"timestamp"`
+	AgentID   string    `json:"agent_id"`
+	Hostname  string    `json:"hostname"`
+	CPUUsage  float64   `json:"cpu_usage_percent"`
+	RAMUsage  float64   `json:"ram_usage_percent"`
+	DiskUsage float64   `json:"disk_usage_percent"`
+	Uptime    uint64    `json:"uptime_seconds"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
-// Config armazena configurações de runtime do agente
 type Config struct {
 	ServerURL string
 	Token     string
@@ -61,7 +58,6 @@ type Config struct {
 }
 
 func main() {
-	// Parse de argumentos de linha de comando
 	serverURL := flag.String("server", "", "URL do servidor SolloRMM (ex: https://api.sollobrasil.com.br)")
 	token := flag.String("token", "", "Token de autenticação do agente")
 	flag.Parse()
@@ -80,18 +76,15 @@ func main() {
 	log.Printf("Agent ID: %s", cfg.AgentID)
 	log.Printf("Servidor: %s", cfg.ServerURL)
 
-	// Envia informações completas do sistema na inicialização
 	if err := sendSystemInfo(cfg); err != nil {
 		log.Printf("Erro ao enviar system info inicial: %v", err)
 	}
 
-	// Loop principal: heartbeats periódicos
 	heartbeatTicker := time.NewTicker(heartbeatInterval)
 	systemInfoTicker := time.NewTicker(systemInfoInterval)
 	defer heartbeatTicker.Stop()
 	defer systemInfoTicker.Stop()
 
-	// Primeiro heartbeat imediato
 	if err := sendHeartbeat(cfg); err != nil {
 		log.Printf("Erro no heartbeat inicial: %v", err)
 	}
@@ -110,11 +103,9 @@ func main() {
 	}
 }
 
-// getOrCreateAgentID lê o agent_id de um arquivo local ou cria um novo
 func getOrCreateAgentID() string {
 	idFile := "agent_id.txt"
 
-	// Tenta ler ID existente
 	if data, err := os.ReadFile(idFile); err == nil {
 		id := string(bytes.TrimSpace(data))
 		if id != "" {
@@ -122,7 +113,6 @@ func getOrCreateAgentID() string {
 		}
 	}
 
-	// Cria novo UUID e salva
 	newID := uuid.New().String()
 	if err := os.WriteFile(idFile, []byte(newID), 0600); err != nil {
 		log.Printf("Aviso: não foi possível salvar agent_id: %v", err)
@@ -130,7 +120,6 @@ func getOrCreateAgentID() string {
 	return newID
 }
 
-// collectSystemInfo coleta informações completas do sistema
 func collectSystemInfo(cfg *Config) (*SystemInfo, error) {
 	hostInfo, err := host.Info()
 	if err != nil {
@@ -149,7 +138,6 @@ func collectSystemInfo(cfg *Config) (*SystemInfo, error) {
 
 	diskInfo, err := disk.Usage("/")
 	if err != nil {
-		// No Windows, tenta C:\
 		if runtime.GOOS == "windows" {
 			diskInfo, err = disk.Usage("C:\\")
 		}
@@ -159,10 +147,20 @@ func collectSystemInfo(cfg *Config) (*SystemInfo, error) {
 	}
 
 	cpuModel := "unknown"
-	cpuCores := 0
+	// runtime.NumCPU() é a fonte mais confiável: retorna o total de CPUs lógicas
+	// que o SO enxerga (16 num Ryzen 7 5700X3D com SMT, por exemplo)
+	cpuCores := runtime.NumCPU()
 	if len(cpuInfo) > 0 {
 		cpuModel = cpuInfo[0].ModelName
-		cpuCores = int(cpuInfo[0].Cores)
+		// Em servidores multi-socket, gopsutil reporta cores físicos por socket.
+		// Se isso for maior que NumCPU, usa esse valor.
+		totalFromGopsutil := 0
+		for _, c := range cpuInfo {
+			totalFromGopsutil += int(c.Cores)
+		}
+		if totalFromGopsutil > cpuCores {
+			cpuCores = totalFromGopsutil
+		}
 	}
 
 	return &SystemInfo{
@@ -182,14 +180,12 @@ func collectSystemInfo(cfg *Config) (*SystemInfo, error) {
 	}, nil
 }
 
-// collectHeartbeat coleta métricas atuais do sistema
 func collectHeartbeat(cfg *Config) (*Heartbeat, error) {
 	hostInfo, err := host.Info()
 	if err != nil {
 		return nil, err
 	}
 
-	// CPU usage com amostragem de 1 segundo
 	cpuPercent, err := cpu.Percent(1*time.Second, false)
 	if err != nil {
 		return nil, err
@@ -224,17 +220,15 @@ func collectHeartbeat(cfg *Config) (*Heartbeat, error) {
 	}, nil
 }
 
-// sendSystemInfo envia info completa do sistema pro backend
 func sendSystemInfo(cfg *Config) error {
 	info, err := collectSystemInfo(cfg)
 	if err != nil {
 		return err
 	}
-	log.Printf("Enviando system info: %s (%s)", info.Hostname, info.Platform)
+	log.Printf("Enviando system info: %s (%s) - %d cores", info.Hostname, info.Platform, info.CPUCores)
 	return postJSON(cfg, "/api/v1/agents/system-info", info)
 }
 
-// sendHeartbeat envia heartbeat pro backend
 func sendHeartbeat(cfg *Config) error {
 	hb, err := collectHeartbeat(cfg)
 	if err != nil {
@@ -245,7 +239,6 @@ func sendHeartbeat(cfg *Config) error {
 	return postJSON(cfg, "/api/v1/agents/heartbeat", hb)
 }
 
-// postJSON faz POST com JSON e autenticação
 func postJSON(cfg *Config, path string, payload interface{}) error {
 	body, err := json.Marshal(payload)
 	if err != nil {

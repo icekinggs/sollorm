@@ -1,17 +1,29 @@
 # SolloRMM
 
-Sistema próprio de gerenciamento remoto (RMM) para ambiente interno.
+> Sistema próprio de Remote Monitoring & Management (RMM), construído do zero para uso interno.
 
-## Visão geral
+[![Status](https://img.shields.io/badge/status-em%20desenvolvimento-yellow)]()
+[![License](https://img.shields.io/badge/license-MIT-blue)]()
+[![Go](https://img.shields.io/badge/Go-1.22-00ADD8?logo=go)]()
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python)]()
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql)]()
 
-Stack:
-- **Agente**: Go 1.22 (Windows/Linux/macOS)
-- **Backend**: Python 3.12 + FastAPI
-- **Banco**: PostgreSQL 16
-- **Cache**: Redis 7
-- **Frontend** (futuro): Vue 3 + Vuetify
-- **Acesso remoto** (futuro): MeshCentral integrado
-- **Deploy**: Docker Compose
+## Sobre
+
+SolloRMM é uma solução de gerenciamento remoto de endpoints (Windows, Linux, macOS) inspirada em ferramentas como Tactical RMM, NinjaOne e Atera — mas construída do zero, sem amarras de licença, focada em escalar para milhares de endpoints num ambiente corporativo próprio.
+
+## Stack
+
+| Camada | Tecnologia |
+|---|---|
+| Agente | Go 1.22 + gopsutil |
+| Backend API | Python 3.12 + FastAPI + SQLAlchemy 2.0 (async) |
+| Banco de dados | PostgreSQL 16 |
+| Cache / Filas | Redis 7 |
+| Frontend (em breve) | Vue 3 + PrimeVue + Vite |
+| Acesso remoto (em breve) | MeshCentral integrado |
+| Mensageria (em breve) | NATS |
+| Deploy | Docker Compose |
 
 ## Estrutura do projeto
 
@@ -19,51 +31,102 @@ Stack:
 sollorm/
 ├── agent/        # Agente em Go que roda nos endpoints
 ├── backend/      # API em Python/FastAPI
-├── frontend/     # Interface web (Fase 2)
-├── deploy/       # docker-compose, configs de Nginx, etc
-└── docs/         # Documentação técnica
+├── frontend/     # Interface web Vue 3 (Fase 2B)
+├── deploy/       # docker-compose, configs
+└── docs/         # Documentação técnica e guias
 ```
 
 ## Roadmap
 
-- [x] **Fase 0** — Setup do projeto e arquitetura
-- [ ] **Fase 1** — Agente envia heartbeat + info de hardware pro backend
-- [ ] **Fase 2** — Frontend lista agentes e mostra status
-- [ ] **Fase 3** — Execução remota de scripts/comandos
-- [ ] **Fase 4** — Monitoramento (checks) + alertas
-- [ ] **Fase 5** — Integração com MeshCentral pra acesso remoto
-- [ ] **Fase 6** — Patch management Windows
+- [x] **Fase 1** — Agente envia heartbeat + info de hardware pro backend
+- [x] **Fase 2A** — Autenticação JWT no backend, modelo de Users
+- [ ] **Fase 2B** — Frontend Vue 3 com login + dashboard
+- [ ] **Fase 3** — Execução remota de scripts (PowerShell/Bash/Python)
+- [ ] **Fase 4** — Monitoramento ativo (checks) + alertas
+- [ ] **Fase 5** — Integração MeshCentral para acesso remoto
+- [ ] **Fase 6** — Patch management Windows via WSUS API
 
-## Como começar
+## Como rodar
 
 ### Pré-requisitos
-- Docker + Docker Compose na VM Debian
-- Go 1.22+ (apenas para compilar o agente)
+
+- Docker + Docker Compose
+- Go 1.22+ (para compilar o agente)
 - Git
 
 ### Subir o backend
+
 ```bash
-cd deploy
-docker compose up -d
+git clone https://github.com/icekinggs/sollorm.git
+cd sollorm/deploy
+
+# Gerar segredos
+cat > .env << EOF
+POSTGRES_PASSWORD=$(openssl rand -hex 24)
+SECRET_KEY=$(openssl rand -hex 32)
+AGENT_MASTER_TOKEN=$(openssl rand -hex 32)
+EOF
+
+# Anote o AGENT_MASTER_TOKEN — você vai precisar dele
+cat .env
+
+# Subir
+docker compose up -d --build
 ```
 
-A API ficará em `http://localhost:8000` (docs em `/docs`).
+API disponível em `http://localhost:8000` (docs em `/docs`).
+
+### Criar o primeiro usuário admin
+
+```bash
+docker compose exec backend python -m scripts.create_user
+```
 
 ### Compilar e rodar o agente
+
 ```bash
-cd agent
+cd ../agent
+go mod tidy
 go build -o sollorm-agent
-./sollorm-agent --server http://192.168.x.x:8000 --token TOKEN_AQUI
+
+# Linux/macOS
+./sollorm-agent --server http://localhost:8000 --token <AGENT_MASTER_TOKEN>
+
+# Cross-compile pra Windows
+GOOS=windows GOARCH=amd64 go build -o sollorm-agent.exe
 ```
+
+## Endpoints principais
+
+| Método | Rota | Auth | Descrição |
+|---|---|---|---|
+| POST | `/api/v1/auth/login` | — | Login retorna JWT |
+| GET | `/api/v1/auth/me` | JWT | Dados do usuário atual |
+| GET | `/api/v1/agents` | JWT | Lista agentes registrados |
+| GET | `/api/v1/agents/{id}` | JWT | Detalhes de um agente |
+| GET | `/api/v1/agents/{id}/heartbeats` | JWT | Histórico de heartbeats |
+| POST | `/api/v1/agents/system-info` | Agent Token | Agente envia info de SO/hardware |
+| POST | `/api/v1/agents/heartbeat` | Agent Token | Agente envia métricas |
+
+Documentação interativa completa em `/docs` (Swagger UI).
+
+## Documentação
+
+- [Quickstart - Fase 1](docs/QUICKSTART.md)
+- [Upgrade - Fase 2A](docs/FASE-2A-UPGRADE.md)
 
 ## Segurança
 
-- Toda comunicação agente↔backend usa HTTPS + token Bearer
-- Agentes recebem token único na instalação
-- Backend valida token em todo request
 - Senhas hasheadas com Argon2
-- 2FA obrigatório para usuários admin
+- JWT com expiração configurável
+- Token separado para agentes (Bearer master) e usuários humanos (JWT)
+- HTTPS recomendado em produção (use seu próprio certificado wildcard)
+- Sem dados saindo do seu ambiente (100% self-hosted)
 
 ## Licença
 
-Proprietary — uso interno apenas.
+[MIT](LICENSE) — uso livre, sem garantias.
+
+## Status
+
+🚧 **Em desenvolvimento ativo.** Use por sua conta e risco. Não recomendado para produção crítica ainda.

@@ -1,11 +1,9 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 
 class SystemInfoIn(BaseModel):
-    """Payload enviado pelo agente com info completa do sistema."""
-
     agent_id: str
     hostname: str
     os: str
@@ -22,8 +20,6 @@ class SystemInfoIn(BaseModel):
 
 
 class HeartbeatIn(BaseModel):
-    """Payload de heartbeat enviado pelo agente."""
-
     agent_id: str
     hostname: str
     cpu_usage_percent: float = Field(ge=0, le=100)
@@ -34,8 +30,6 @@ class HeartbeatIn(BaseModel):
 
 
 class AgentOut(BaseModel):
-    """Representação de um agente retornada pela API."""
-
     id: str
     hostname: str
     os: str | None
@@ -47,15 +41,13 @@ class AgentOut(BaseModel):
     agent_version: str | None
     first_seen: datetime
     last_seen: datetime | None
-    is_online: bool = False  # calculado: last_seen < 2 min atrás
+    is_online: bool = False
 
     class Config:
         from_attributes = True
 
 
 class HeartbeatOut(BaseModel):
-    """Heartbeat retornado pela API."""
-
     id: int
     agent_id: str
     cpu_usage_percent: float
@@ -70,7 +62,50 @@ class HeartbeatOut(BaseModel):
 
 
 class StatusResponse(BaseModel):
-    """Resposta padrão de sucesso."""
-
     status: str = "ok"
     message: str | None = None
+
+
+class LoginRequest(BaseModel):
+    """Requisição de login - usaremos JSON ao invés do form OAuth2 padrão."""
+
+    username: str
+    password: str
+
+
+class TokenResponse(BaseModel):
+    """Resposta do login - JWT + tipo + info básica do usuário."""
+
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: "UserOut"
+
+
+class UserOut(BaseModel):
+    """Representação de um usuário (sem senha) retornada pela API."""
+
+    id: str
+    username: str
+    email: str
+    full_name: str | None
+    is_active: bool
+    is_superuser: bool
+    created_at: datetime
+    last_login: datetime | None
+
+    class Config:
+        from_attributes = True
+
+
+class UserCreate(BaseModel):
+    """Payload para criar novo usuário (admin only)."""
+
+    username: str = Field(min_length=3, max_length=50, pattern=r"^[a-zA-Z0-9_.-]+$")
+    email: EmailStr
+    full_name: str | None = None
+    password: str = Field(min_length=8, max_length=128)
+    is_superuser: bool = False
+
+
+TokenResponse.model_rebuild()
