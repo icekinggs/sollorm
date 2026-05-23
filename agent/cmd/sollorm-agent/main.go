@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/google/uuid"
 	ksvc "github.com/kardianos/service"
@@ -33,6 +34,30 @@ func main() {
 	stopCmd := flag.Bool("stop", false, "Parar serviço")
 	versionFlag := flag.Bool("version", false, "Mostrar versão e sair")
 	flag.Parse()
+
+	// Setup de logging: se rodando como serviço, escreve em arquivo;
+	// senão (foreground/dev), continua no stderr padrão.
+	if *serviceMode {
+		logPath := ""
+		if *configPath != "" {
+			// agent.log fica ao lado do config.json
+			logPath = filepath.Join(filepath.Dir(*configPath), "agent.log")
+		} else {
+			// fallback: ao lado do executável
+			if exe, err := os.Executable(); err == nil {
+				logPath = filepath.Join(filepath.Dir(exe), "agent.log")
+			}
+		}
+
+		if logPath != "" {
+			logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0640)
+			if err == nil {
+				log.SetOutput(logFile)
+				log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+				log.Printf("=== SolloRMM Agent log iniciado em %s ===", time.Now().Format(time.RFC3339))
+			}
+		}
+	}
 
 	if *versionFlag {
 		fmt.Printf("sollorm-agent v%s (%s/%s)\n", reporter.AgentVersion, runtime.GOOS, runtime.GOARCH)
