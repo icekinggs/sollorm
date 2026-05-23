@@ -17,6 +17,7 @@
     "": {
       "title": "SolloRMM Remote Access",
       "title2": "MeshCentral",
+      "allowedOrigin": true,
       "minify": false,
       "NewAccounts": true,
       "localSessionRecording": true
