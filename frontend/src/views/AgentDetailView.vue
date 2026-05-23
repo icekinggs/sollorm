@@ -16,6 +16,8 @@ import Tag from 'primevue/tag'
 import ProgressSpinner from 'primevue/progressspinner'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
+import { useConfirm } from 'primevue/useconfirm'
+import ConfirmDialog from 'primevue/confirmdialog'
 
 const props = defineProps({
   id: { type: String, required: true }
@@ -23,6 +25,8 @@ const props = defineProps({
 
 const router = useRouter()
 const toast = useToast()
+const confirm = useConfirm()
+const deleting = ref(false)
 
 const agent = ref(null)
 const heartbeats = ref([])
@@ -61,6 +65,48 @@ async function loadData() {
   }
 }
 
+function handleDelete() {
+  if (!agent.value) return
+
+  confirm.require({
+    message: `Tem certeza que deseja apagar o agente "${agent.value.hostname}"?
+
+Isso vai:
+- Apagar todo o histórico de heartbeats
+- Apagar o token de instalação
+- A máquina vai parar de reportar até ser reinstalada
+
+Esta ação NÃO pode ser desfeita.`,
+    header: 'Confirmar exclusão',
+    icon: 'pi pi-exclamation-triangle',
+    acceptClass: 'p-button-danger',
+    acceptLabel: 'Sim, apagar',
+    rejectLabel: 'Cancelar',
+    accept: async () => {
+      deleting.value = true
+      try {
+        await agentsApi.delete(props.id)
+        toast.add({
+          severity: 'success',
+          summary: 'Agente apagado',
+          detail: `"${agent.value.hostname}" foi removido do sistema`,
+          life: 3000
+        })
+        if (refreshInterval.value) clearInterval(refreshInterval.value)
+        router.push('/dashboard')
+      } catch (err) {
+        deleting.value = false
+        toast.add({
+          severity: 'error',
+          summary: 'Erro',
+          detail: err.response?.data?.detail || 'Falha ao apagar agente',
+          life: 4000
+        })
+      }
+    }
+  })
+}
+
 onMounted(() => {
   loadData()
   refreshInterval.value = setInterval(loadData, 30000)
@@ -88,7 +134,18 @@ onUnmounted(() => {
         :value="agent.is_online ? 'Online' : 'Offline'"
         :severity="agent.is_online ? 'success' : 'secondary'"
       />
+      <div class="header-spacer"></div>
+      <Button
+        v-if="agent"
+        label="Apagar agente"
+        icon="pi pi-trash"
+        severity="danger"
+        outlined
+        :loading="deleting"
+        @click="handleDelete"
+      />
     </div>
+    <ConfirmDialog />
 
     <div v-if="loading" class="loading-state">
       <ProgressSpinner style="width: 32px; height: 32px" stroke-width="4" />
@@ -233,6 +290,10 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.75rem;
   margin-bottom: 1.5rem;
+}
+
+.header-spacer {
+  flex: 1;
 }
 
 .page-header h2 {

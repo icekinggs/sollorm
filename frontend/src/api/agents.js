@@ -11,5 +11,9 @@ export const agentsApi = {
 
   heartbeats(id, limit = 100) {
     return api.get(`/agents/${id}/heartbeats`, { params: { limit } })
+  },
+
+  delete(id) {
+    return api.delete(`/agents/${id}`)
   }
 }

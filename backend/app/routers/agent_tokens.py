@@ -22,7 +22,7 @@ router = APIRouter(prefix="/agent-tokens", tags=["agent-tokens"])
 def _build_token_out(token: AgentToken) -> AgentTokenOut:
     """Constrói AgentTokenOut com is_active calculado."""
     is_active = token.revoked_at is None
-    if token.expires_at is not None:
+    if token.expires_at is not None and is_active:
         if token.expires_at.tzinfo is None:
             exp = token.expires_at.replace(tzinfo=timezone.utc)
         else:
@@ -30,9 +30,21 @@ def _build_token_out(token: AgentToken) -> AgentTokenOut:
         if datetime.now(timezone.utc) > exp:
             is_active = False
 
-    data = AgentTokenOut.model_validate(token).model_dump()
-    data["is_active"] = is_active
-    return AgentTokenOut(**data)
+    # Constrói manualmente o dict ao invés de usar model_validate + model_dump
+    # (model_validate falha porque is_active não existe no model SQLAlchemy)
+    return AgentTokenOut(
+        id=token.id,
+        name=token.name,
+        platform_hint=token.platform_hint,
+        token_prefix=token.token_prefix,
+        created_at=token.created_at,
+        last_used_at=token.last_used_at,
+        expires_at=token.expires_at,
+        revoked_at=token.revoked_at,
+        created_by_user_id=token.created_by_user_id,
+        agent_id=token.agent_id,
+        is_active=is_active,
+    )
 
 
 def _build_install_command(platform: str, raw_token: str) -> tuple[str, str]:
@@ -41,10 +53,12 @@ def _build_install_command(platform: str, raw_token: str) -> tuple[str, str]:
 
     if platform == "windows":
         script_url = f"{base}/install/windows.ps1"
+        # IMPORTANTE: o one-liner é para ser COLADO em um PowerShell já aberto
+        # (não usa `powershell -Command "..."` aninhado, que quebra as variáveis $env:)
         oneliner = (
-            f"powershell -Command \"$env:SOLLORM_TOKEN='{raw_token}'; "
+            f"$env:SOLLORM_TOKEN='{raw_token}'; "
             f"$env:SOLLORM_SERVER='{base}'; "
-            f"iwr -useb {script_url} | iex\""
+            f"iwr -useb {script_url} | iex"
         )
     else:  # linux/darwin
         script_url = f"{base}/install/linux.sh"

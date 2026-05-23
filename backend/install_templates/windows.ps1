@@ -2,6 +2,10 @@
 
 $ErrorActionPreference = "Stop"
 
+# Garante saída UTF-8 no console (resolve "==> Verificando instala????o")
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 $SOLLORM_SERVER = if ($env:SOLLORM_SERVER) { $env:SOLLORM_SERVER } else { "{{SOLLORM_SERVER}}" }
 $SOLLORM_TOKEN = $env:SOLLORM_TOKEN
 $GITHUB_REPO = "{{GITHUB_REPO}}"
@@ -91,21 +95,36 @@ $config = @{
     server = $SOLLORM_SERVER
     token = $SOLLORM_TOKEN
 } | ConvertTo-Json
-Set-Content -Path $configPath -Value $config -Encoding UTF8
 
-# Permissões: só admin lê o config (tem o token)
-$acl = Get-Acl $configPath
-$acl.SetAccessRuleProtection($true, $false)
-$rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-    "BUILTIN\Administrators", "FullControl", "Allow"
-)
-$acl.AddAccessRule($rule)
-$rule2 = New-Object System.Security.AccessControl.FileSystemAccessRule(
-    "NT AUTHORITY\SYSTEM", "FullControl", "Allow"
-)
-$acl.AddAccessRule($rule2)
-Set-Acl -Path $configPath -AclObject $acl
-Write-Ok "Config protegido"
+# IMPORTANTE: usar UTF-8 SEM BOM. O Set-Content -Encoding UTF8 do PS5 adiciona BOM,
+# que quebra o parser JSON do Go. Por isso usamos WriteAllText do .NET diretamente.
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($configPath, $config, $utf8NoBom)
+
+# Permissões: só Administradores e SYSTEM podem ler/escrever o config
+# Usando SID ao invés de nome para funcionar em Windows de qualquer idioma
+try {
+    $adminSid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-544")
+    $systemSid = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-18")
+
+    $acl = Get-Acl $configPath
+    $acl.SetAccessRuleProtection($true, $false)
+
+    $ruleAdmin = New-Object System.Security.AccessControl.FileSystemAccessRule(
+        $adminSid, "FullControl", "Allow"
+    )
+    $acl.AddAccessRule($ruleAdmin)
+
+    $ruleSystem = New-Object System.Security.AccessControl.FileSystemAccessRule(
+        $systemSid, "FullControl", "Allow"
+    )
+    $acl.AddAccessRule($ruleSystem)
+
+    Set-Acl -Path $configPath -AclObject $acl
+    Write-Ok "Config protegido (apenas Admin e SYSTEM)"
+} catch {
+    Write-Host "  [AVISO] Não foi possível restringir permissões do config: $($_.Exception.Message)" -ForegroundColor Yellow
+}
 
 # Criar/atualizar serviço Windows
 Write-Step "Configurando Windows Service"
