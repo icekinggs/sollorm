@@ -94,15 +94,19 @@ DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/download/${AGENT_VERSIO
 echo "  URL: ${DOWNLOAD_URL}"
 
 BINARY_PATH="${INSTALL_DIR}/${BINARY_NAME}"
+BINARY_TMP="${BINARY_PATH}.download"
+rm -f "${BINARY_TMP}"
 
-if ! curl -fsSL --connect-timeout 30 -o "${BINARY_PATH}" "${DOWNLOAD_URL}"; then
+if ! curl -fsSL --connect-timeout 30 -o "${BINARY_TMP}" "${DOWNLOAD_URL}"; then
     err "Falha ao baixar binário."
     echo ""
     echo "  Verifique se a release ${AGENT_VERSION} existe no GitHub:"
     echo "  https://github.com/${GITHUB_REPO}/releases"
+    rm -f "${BINARY_TMP}"
     exit 1
 fi
 
+mv -f "${BINARY_TMP}" "${BINARY_PATH}"
 chmod 755 "${BINARY_PATH}"
 ok "Binário salvo em ${BINARY_PATH}"
 
