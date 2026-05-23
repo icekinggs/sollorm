@@ -21,6 +21,8 @@ import ConfirmDialog from 'primevue/confirmdialog'
 import Select from 'primevue/select'
 import Textarea from 'primevue/textarea'
 import InputNumber from 'primevue/inputnumber'
+import InputText from 'primevue/inputtext'
+import Password from 'primevue/password'
 
 const props = defineProps({
   id: { type: String, required: true }
@@ -37,6 +39,18 @@ const executions = ref([])
 const loading = ref(true)
 const refreshInterval = ref(null)
 const executing = ref(false)
+const sshVisible = ref(false)
+const sshConnecting = ref(false)
+const sshConnected = ref(false)
+const sshOutput = ref('')
+const sshInput = ref('')
+const sshSocket = ref(null)
+const sshForm = ref({
+  host: '',
+  port: 22,
+  username: '',
+  password: ''
+})
 const scriptForm = ref({
   language: 'bash',
   script: 'hostname\nwhoami',
@@ -61,6 +75,9 @@ async function loadData() {
     agent.value = agentRes.data
     heartbeats.value = hbRes.data
     executions.value = execRes.data
+    if (!sshForm.value.host) {
+      sshForm.value.host = agentRes.data.hostname || ''
+    }
   } catch (err) {
     if (err.response?.status === 404) {
       toast.add({
@@ -91,8 +108,97 @@ function executionSeverity(status) {
 }
 
 function openRemoteAccess() {
-  if (!agent.value?.remote_access_url) return
-  window.open(agent.value.remote_access_url, '_blank', 'noopener,noreferrer')
+  sshVisible.value = true
+}
+
+function sshWebSocketUrl() {
+  const token = localStorage.getItem('sollorm_token')
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const host = `${window.location.hostname}:8000`
+  const query = new URLSearchParams({ token })
+  return `${protocol}//${host}/api/v1/agents/${props.id}/ssh?${query.toString()}`
+}
+
+function appendSshOutput(text) {
+  sshOutput.value += text
+}
+
+function connectSsh() {
+  if (!sshForm.value.host || !sshForm.value.username) {
+    toast.add({
+      severity: 'warn',
+      summary: 'SSH incompleto',
+      detail: 'Informe host e usuário',
+      life: 3000
+    })
+    return
+  }
+
+  disconnectSsh(false)
+  sshConnecting.value = true
+  sshOutput.value = ''
+
+  const socket = new WebSocket(sshWebSocketUrl())
+  sshSocket.value = socket
+
+  socket.onopen = () => {
+    socket.send(JSON.stringify({
+      type: 'connect',
+      host: sshForm.value.host,
+      port: sshForm.value.port,
+      username: sshForm.value.username,
+      password: sshForm.value.password
+    }))
+  }
+
+  socket.onmessage = (event) => {
+    const message = JSON.parse(event.data)
+    if (message.type === 'connected') {
+      sshConnecting.value = false
+      sshConnected.value = true
+      appendSshOutput('SSH conectado.\n')
+    } else if (message.type === 'output') {
+      appendSshOutput(message.data)
+    } else if (message.type === 'error') {
+      sshConnecting.value = false
+      appendSshOutput(`\n${message.message}\n`)
+    }
+  }
+
+  socket.onerror = () => {
+    sshConnecting.value = false
+    appendSshOutput('\nErro na conexão SSH.\n')
+  }
+
+  socket.onclose = () => {
+    sshConnecting.value = false
+    sshConnected.value = false
+    if (sshSocket.value === socket) {
+      sshSocket.value = null
+    }
+  }
+}
+
+function disconnectSsh(sendClose = true) {
+  if (sshSocket.value) {
+    if (sendClose && sshSocket.value.readyState === WebSocket.OPEN) {
+      sshSocket.value.send(JSON.stringify({ type: 'disconnect' }))
+    }
+    sshSocket.value.close()
+  }
+  sshSocket.value = null
+  sshConnecting.value = false
+  sshConnected.value = false
+}
+
+function sendSshInput() {
+  if (!sshConnected.value || !sshSocket.value || !sshInput.value) return
+  sshSocket.value.send(JSON.stringify({
+    type: 'input',
+    data: `${sshInput.value}\n`
+  }))
+  appendSshOutput(`$ ${sshInput.value}\n`)
+  sshInput.value = ''
 }
 
 async function runScript() {
@@ -181,6 +287,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (refreshInterval.value) clearInterval(refreshInterval.value)
+  disconnectSsh()
 })
 </script>
 
@@ -203,9 +310,9 @@ onUnmounted(() => {
       />
       <div class="header-spacer"></div>
       <Button
-        v-if="agent?.remote_access_url"
-        label="Conectar"
-        icon="pi pi-external-link"
+        v-if="agent?.os !== 'windows'"
+        label="Conectar SSH"
+        icon="pi pi-terminal"
         outlined
         @click="openRemoteAccess"
       />
@@ -312,6 +419,69 @@ onUnmounted(() => {
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <div class="card full-width">
+        <h3>Acesso SSH</h3>
+        <div v-if="sshVisible" class="ssh-panel">
+          <div class="ssh-toolbar">
+            <InputText
+              v-model="sshForm.host"
+              placeholder="Host ou IP"
+              class="ssh-host"
+            />
+            <InputNumber
+              v-model="sshForm.port"
+              :min="1"
+              :max="65535"
+              class="ssh-port"
+            />
+            <InputText
+              v-model="sshForm.username"
+              placeholder="Usuário"
+              class="ssh-user"
+            />
+            <Password
+              v-model="sshForm.password"
+              placeholder="Senha"
+              :feedback="false"
+              toggle-mask
+              class="ssh-password"
+            />
+            <Button
+              v-if="!sshConnected"
+              label="Conectar"
+              icon="pi pi-link"
+              :loading="sshConnecting"
+              @click="connectSsh"
+            />
+            <Button
+              v-else
+              label="Desconectar"
+              icon="pi pi-times"
+              severity="secondary"
+              outlined
+              @click="disconnectSsh"
+            />
+          </div>
+          <pre class="ssh-terminal mono">{{ sshOutput || 'Aguardando conexão SSH...' }}</pre>
+          <div class="ssh-input-row">
+            <InputText
+              v-model="sshInput"
+              placeholder="Digite um comando e pressione Enter"
+              :disabled="!sshConnected"
+              fluid
+              @keyup.enter="sendSshInput"
+            />
+            <Button
+              icon="pi pi-send"
+              :disabled="!sshConnected"
+              @click="sendSshInput"
+              aria-label="Enviar comando SSH"
+            />
+          </div>
+        </div>
+        <p v-else class="text-muted">Clique em Conectar SSH para abrir uma sessão nativa no navegador.</p>
       </div>
 
       <div class="card full-width">
@@ -524,6 +694,53 @@ onUnmounted(() => {
   font-size: 0.8rem;
 }
 
+.ssh-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.ssh-toolbar {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.ssh-host {
+  min-width: 180px;
+  flex: 1;
+}
+
+.ssh-port {
+  width: 110px;
+}
+
+.ssh-user {
+  width: 150px;
+}
+
+.ssh-password {
+  width: 180px;
+}
+
+.ssh-terminal {
+  min-height: 300px;
+  max-height: 460px;
+  overflow: auto;
+  margin: 0;
+  padding: 1rem;
+  border-radius: 8px;
+  background: #0b1020;
+  color: #d7e1ff;
+  border: 1px solid var(--p-content-border-color);
+  white-space: pre-wrap;
+}
+
+.ssh-input-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .script-runner {
   display: flex;
   flex-direction: column;
@@ -578,8 +795,17 @@ onUnmounted(() => {
     flex-direction: column;
   }
 
+  .ssh-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .language-select,
-  .timeout-input {
+  .timeout-input,
+  .ssh-host,
+  .ssh-port,
+  .ssh-user,
+  .ssh-password {
     width: 100%;
   }
 }

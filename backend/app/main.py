@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import Base, engine
-from app.routers import agent_tokens, agents, auth, install, script_executions
+from app.routers import agent_tokens, agents, auth, install, remote_access, script_executions
 
 
 @asynccontextmanager
@@ -36,6 +36,10 @@ app.include_router(auth.router, prefix=settings.api_v1_prefix)
 app.include_router(agents.router, prefix=settings.api_v1_prefix)
 app.include_router(agent_tokens.router, prefix=settings.api_v1_prefix)
 app.include_router(script_executions.router, prefix=settings.api_v1_prefix)
+app.add_api_websocket_route(
+    f"{settings.api_v1_prefix}/agents/{{agent_id}}/ssh",
+    remote_access.ssh_websocket,
+)
 
 # Router público - serve scripts de instalação
 app.include_router(install.router)
