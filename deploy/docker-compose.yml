@@ -1,0 +1,56 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: sollorm-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sollorm
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sollorm_dev_change_me}
+      POSTGRES_DB: sollorm
+    volumes:
+      - sollorm_db_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sollorm"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: sollorm-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - sollorm_redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: sollorm-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://sollorm:${POSTGRES_PASSWORD:-sollorm_dev_change_me}@db:5432/sollorm
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:-mude_em_producao_use_openssl_rand_hex_32}
+      AGENT_MASTER_TOKEN: ${AGENT_MASTER_TOKEN:-mude_este_token_imediatamente}
+    ports:
+      - "8000:8000"
+
+volumes:
+  sollorm_db_data:
+  sollorm_redis_data:
