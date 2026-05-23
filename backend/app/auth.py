@@ -5,20 +5,34 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.models import User
+from app.models import AgentToken, User
 from app.security import decode_access_token
+from app.services.tokens import find_valid_token, mark_token_used
 
 oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl=f"{settings.api_v1_prefix}/auth/login", auto_error=False
 )
 
 
-async def verify_agent_token(authorization: str = Header(...)) -> str:
+class AgentAuthResult:
+    """Resultado da autenticação de agente - inclui o token usado (se for individual)."""
+
+    def __init__(self, raw_token: str, agent_token: AgentToken | None, is_legacy: bool):
+        self.raw_token = raw_token
+        self.agent_token = agent_token  # None se for master token legado
+        self.is_legacy = is_legacy
+
+
+async def verify_agent_token(
+    authorization: str = Header(...),
+    db: AsyncSession = Depends(get_db),
+) -> AgentAuthResult:
     """
     Valida o token Bearer enviado pelo agente.
 
-    Na Fase 1 usamos um único master token para simplificar.
-    Na Fase 3 cada agente terá seu próprio token único.
+    Aceita 2 formas (durante transição):
+    1. Token individual no formato sollo_xxx... (recomendado)
+    2. AGENT_MASTER_TOKEN do .env (legado, será removido em fases futuras)
     """
     if not authorization.startswith("Bearer "):
         raise HTTPException(
@@ -28,23 +42,33 @@ async def verify_agent_token(authorization: str = Header(...)) -> str:
 
     token = authorization.replace("Bearer ", "", 1).strip()
 
-    if token != settings.agent_master_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token inválido",
-        )
+    # 1. Tenta como token individual (prefixo sollo_)
+    if token.startswith("sollo_"):
+        agent_token = await find_valid_token(db, token)
+        if agent_token is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token inválido, revogado ou expirado",
+            )
 
-    return token
+        await mark_token_used(db, agent_token)
+        # NOTA: commit é feito pelo handler do endpoint
+        return AgentAuthResult(raw_token=token, agent_token=agent_token, is_legacy=False)
+
+    # 2. Fallback - master token legado
+    if settings.allow_legacy_master_token and token == settings.agent_master_token:
+        return AgentAuthResult(raw_token=token, agent_token=None, is_legacy=True)
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Token inválido",
+    )
 
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """
-    Resolve o usuário humano atual a partir do JWT no header Authorization.
-    Usado em rotas que humanos acessam (listagem, dashboards, etc).
-    """
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -82,7 +106,6 @@ async def get_current_user(
 async def get_current_superuser(
     current_user: User = Depends(get_current_user),
 ) -> User:
-    """Garante que o usuário tem privilégios de admin."""
     if not current_user.is_superuser:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

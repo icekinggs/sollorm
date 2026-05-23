@@ -1,0 +1,84 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #app {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+    Ubuntu, Cantarell, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  background: var(--p-content-background);
+  color: var(--p-text-color);
+  -webkit-font-smoothing: antialiased;
+  transition: background 0.2s ease;
+}
+
+a {
+  color: var(--p-primary-color);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+.app-container {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.page-container {
+  padding: 1.5rem;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.usage-bar {
+  width: 100%;
+  height: 6px;
+  background: var(--p-surface-200);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.sollorm-dark .usage-bar {
+  background: var(--p-surface-700);
+}
+
+.usage-bar-fill {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.usage-bar-fill.low { background: var(--p-green-500); }
+.usage-bar-fill.medium { background: var(--p-yellow-500); }
+.usage-bar-fill.high { background: var(--p-red-500); }
+
+.text-muted {
+  color: var(--p-text-muted-color);
+  font-size: 0.85rem;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 4rem 2rem;
+  color: var(--p-text-muted-color);
+}
+
+.empty-state i {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+  opacity: 0.4;
+}

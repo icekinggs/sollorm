@@ -19,7 +19,21 @@ class Settings(BaseSettings):
         "https://rmm.sollobrasil.com.br",
     ]
 
+    # ---------- Agentes ----------
+    # Master token legado - sera removido em fases futuras
     agent_master_token: str = "MUDE_ESTE_TOKEN_GERE_UM_NOVO"
+    allow_legacy_master_token: bool = True
+
+    # URL pública do backend - usada nos scripts de instalação
+    # IMPORTANTE: deve ser alcançável pelos endpoints!
+    public_backend_url: str = "http://172.16.2.12:8000"
+
+    # ---------- Releases (binários do agente) ----------
+    # Owner/repo no GitHub onde estão os releases do agente
+    github_repo: str = "icekinggs/sollorm"
+
+    # Versão atual recomendada (atualize quando publicar nova release)
+    agent_current_version: str = "v0.3.0"
 
 
 settings = Settings()

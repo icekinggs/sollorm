@@ -3,10 +3,11 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from app.auth import get_current_user, verify_agent_token
+from app.auth import AgentAuthResult, get_current_user, verify_agent_token
 from app.database import get_db
-from app.models import Agent, Heartbeat, User
+from app.models import Agent, AgentToken, Heartbeat, User
 from app.schemas import (
     AgentOut,
     HeartbeatIn,
@@ -21,7 +22,7 @@ ONLINE_THRESHOLD_SECONDS = 120
 
 
 def _build_agent_out(agent: Agent, now: datetime) -> AgentOut:
-    """Constrói AgentOut com is_online calculado, lidando com timezone."""
+    """Constrói AgentOut com is_online e info do token."""
     threshold = now - timedelta(seconds=ONLINE_THRESHOLD_SECONDS)
 
     last_seen_aware = agent.last_seen
@@ -32,14 +33,31 @@ def _build_agent_out(agent: Agent, now: datetime) -> AgentOut:
     agent_dict["is_online"] = (
         last_seen_aware is not None and last_seen_aware > threshold
     )
+
+    # Adiciona info do token (se houver)
+    if agent.token is not None:
+        agent_dict["token_name"] = agent.token.name
+        agent_dict["token_prefix"] = agent.token.token_prefix
+
     return AgentOut(**agent_dict)
+
+
+async def _link_token_to_agent(
+    db: AsyncSession, auth: AgentAuthResult, agent: Agent
+) -> None:
+    """Vincula o token individual ao agent (se ainda não vinculado)."""
+    if auth.is_legacy or auth.agent_token is None:
+        return
+
+    if auth.agent_token.agent_id is None:
+        auth.agent_token.agent_id = agent.id
 
 
 @router.post("/system-info", response_model=StatusResponse)
 async def receive_system_info(
     payload: SystemInfoIn,
     db: AsyncSession = Depends(get_db),
-    _: str = Depends(verify_agent_token),
+    auth: AgentAuthResult = Depends(verify_agent_token),
 ):
     """Recebe info completa de hardware/SO do agente."""
     now = datetime.now(timezone.utc)
@@ -50,6 +68,7 @@ async def receive_system_info(
     if agent is None:
         agent = Agent(id=payload.agent_id)
         db.add(agent)
+        await db.flush()  # garante ID disponível antes de vincular token
 
     agent.hostname = payload.hostname
     agent.os = payload.os
@@ -64,6 +83,7 @@ async def receive_system_info(
     agent.last_system_info = now
     agent.last_seen = now
 
+    await _link_token_to_agent(db, auth, agent)
     await db.commit()
     return StatusResponse(message=f"Agente {agent.hostname} atualizado")
 
@@ -72,7 +92,7 @@ async def receive_system_info(
 async def receive_heartbeat(
     payload: HeartbeatIn,
     db: AsyncSession = Depends(get_db),
-    _: str = Depends(verify_agent_token),
+    auth: AgentAuthResult = Depends(verify_agent_token),
 ):
     """Recebe heartbeat com métricas atuais do agente."""
     now = datetime.now(timezone.utc)
@@ -83,6 +103,7 @@ async def receive_heartbeat(
     if agent is None:
         agent = Agent(id=payload.agent_id, hostname=payload.hostname)
         db.add(agent)
+        await db.flush()
 
     agent.last_seen = now
     if not agent.hostname:
@@ -98,6 +119,7 @@ async def receive_heartbeat(
     )
     db.add(heartbeat)
 
+    await _link_token_to_agent(db, auth, agent)
     await db.commit()
     return StatusResponse(message="heartbeat recebido")
 
@@ -108,10 +130,11 @@ async def list_agents(
     current_user: User = Depends(get_current_user),
 ):
     """Lista todos os agentes registrados. Requer login."""
-    result = await db.execute(select(Agent).order_by(Agent.hostname))
+    result = await db.execute(
+        select(Agent).options(selectinload(Agent.token)).order_by(Agent.hostname)
+    )
     agents = result.scalars().all()
     now = datetime.now(timezone.utc)
-
     return [_build_agent_out(agent, now) for agent in agents]
 
 
@@ -121,8 +144,10 @@ async def get_agent(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Retorna detalhes de um agente específico. Requer login."""
-    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    """Retorna detalhes de um agente. Requer login."""
+    result = await db.execute(
+        select(Agent).options(selectinload(Agent.token)).where(Agent.id == agent_id)
+    )
     agent = result.scalar_one_or_none()
 
     if agent is None:
@@ -140,7 +165,7 @@ async def get_agent_heartbeats(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Retorna os últimos heartbeats de um agente. Requer login."""
+    """Retorna últimos heartbeats. Requer login."""
     result = await db.execute(
         select(Heartbeat)
         .where(Heartbeat.agent_id == agent_id)

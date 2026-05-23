@@ -107,3 +107,6 @@ logs/
 .cache/
 tmp/
 temp/
+
+# Windows zone identifier files
+*:Zone.Identifier

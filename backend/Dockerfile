@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/ ./app/
 COPY scripts/ ./scripts/
+COPY install_templates/ ./install_templates/
 
 RUN useradd -m -u 1000 sollorm && chown -R sollorm:sollorm /app
 USER sollorm

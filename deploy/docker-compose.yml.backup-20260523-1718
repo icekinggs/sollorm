@@ -48,10 +48,6 @@ services:
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: ${SECRET_KEY:-mude_em_producao_use_openssl_rand_hex_32}
       AGENT_MASTER_TOKEN: ${AGENT_MASTER_TOKEN:-mude_este_token_imediatamente}
-      PUBLIC_BACKEND_URL: ${PUBLIC_BACKEND_URL:-http://172.16.2.12:8000}
-      GITHUB_REPO: ${GITHUB_REPO:-icekinggs/sollorm}
-      AGENT_CURRENT_VERSION: ${AGENT_CURRENT_VERSION:-v0.3.0}
-      ALLOW_LEGACY_MASTER_TOKEN: ${ALLOW_LEGACY_MASTER_TOKEN:-true}
     ports:
       - "8000:8000"
 
