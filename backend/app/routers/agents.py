@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.auth import AgentAuthResult, get_current_user, verify_agent_token
+from app.config import settings
 from app.database import get_db
 from app.models import Agent, AgentToken, Heartbeat, User
 from app.schemas import (
@@ -51,6 +52,7 @@ def _build_agent_out(agent: Agent, now: datetime) -> AgentOut:
         is_online=is_online,
         token_name=token_name,
         token_prefix=token_prefix,
+        remote_access_url=settings.meshcentral_public_url.rstrip("/") or None,
     )
 
 

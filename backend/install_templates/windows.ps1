@@ -8,6 +8,7 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 
 $SOLLORM_SERVER = if ($env:SOLLORM_SERVER) { $env:SOLLORM_SERVER } else { "{{SOLLORM_SERVER}}" }
 $SOLLORM_TOKEN = $env:SOLLORM_TOKEN
+$MESHCENTRAL_AGENT_URL = if ($env:MESHCENTRAL_AGENT_URL) { $env:MESHCENTRAL_AGENT_URL } else { "{{MESHCENTRAL_AGENT_WINDOWS_URL}}" }
 $GITHUB_REPO = "{{GITHUB_REPO}}"
 $AGENT_VERSION = "{{AGENT_VERSION}}"
 
@@ -47,6 +48,21 @@ if ([string]::IsNullOrEmpty($SOLLORM_TOKEN)) {
 if (-not $SOLLORM_TOKEN.StartsWith("sollo_")) {
     Write-Err "Token inválido - deve começar com 'sollo_'"
     exit 1
+}
+
+Write-Step "Instalando MeshCentral Agent"
+if (-not [string]::IsNullOrWhiteSpace($MESHCENTRAL_AGENT_URL)) {
+    $meshInstaller = Join-Path $env:TEMP "sollorm-meshagent.exe"
+    try {
+        Invoke-WebRequest -Uri $MESHCENTRAL_AGENT_URL -OutFile $meshInstaller -UseBasicParsing
+        Start-Process -FilePath $meshInstaller -ArgumentList "-fullinstall" -Wait
+        Write-Ok "MeshCentral Agent instalado"
+    } catch {
+        Write-Host "  [AVISO] MeshCentral Agent falhou: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "  O SolloRMM Agent continuará a instalação." -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "  [AVISO] MESHCENTRAL_AGENT_URL não configurado. Pulando MeshCentral Agent." -ForegroundColor Yellow
 }
 
 # Parar serviço se já existe (atualização)

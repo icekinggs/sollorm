@@ -34,6 +34,8 @@ def _render_template(filename: str) -> str:
         "{{SOLLORM_SERVER}}": settings.public_backend_url,
         "{{GITHUB_REPO}}": settings.github_repo,
         "{{AGENT_VERSION}}": settings.agent_current_version,
+        "{{MESHCENTRAL_AGENT_LINUX_URL}}": settings.meshcentral_agent_linux_url,
+        "{{MESHCENTRAL_AGENT_WINDOWS_URL}}": settings.meshcentral_agent_windows_url,
     }
 
     for placeholder, value in replacements.items():

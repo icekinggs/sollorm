@@ -45,6 +45,7 @@ class AgentOut(BaseModel):
     is_online: bool = False
     token_name: str | None = None
     token_prefix: str | None = None
+    remote_access_url: str | None = None
 
     class Config:
         from_attributes = True

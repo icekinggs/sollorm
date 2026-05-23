@@ -7,6 +7,7 @@ set -euo pipefail
 
 SOLLORM_SERVER="${SOLLORM_SERVER:-{{SOLLORM_SERVER}}}"
 SOLLORM_TOKEN="${SOLLORM_TOKEN:-}"
+MESHCENTRAL_AGENT_URL="${MESHCENTRAL_AGENT_URL:-{{MESHCENTRAL_AGENT_LINUX_URL}}}"
 GITHUB_REPO="{{GITHUB_REPO}}"
 AGENT_VERSION="{{AGENT_VERSION}}"
 
@@ -77,6 +78,24 @@ fi
 if ! command -v curl >/dev/null 2>&1; then
     err "curl não encontrado. Instale antes de prosseguir."
     exit 1
+fi
+
+step "Instalando MeshCentral Agent"
+if [ -n "${MESHCENTRAL_AGENT_URL}" ]; then
+    MESH_INSTALLER="/tmp/sollorm-meshinstall.sh"
+    if curl -fsSL --connect-timeout 30 -o "${MESH_INSTALLER}" "${MESHCENTRAL_AGENT_URL}"; then
+        chmod 700 "${MESH_INSTALLER}"
+        if bash "${MESH_INSTALLER}"; then
+            ok "MeshCentral Agent instalado"
+        else
+            warn "MeshCentral Agent falhou. O SolloRMM Agent continuará a instalação."
+        fi
+        rm -f "${MESH_INSTALLER}"
+    else
+        warn "Não foi possível baixar o MeshCentral Agent. Verifique MESHCENTRAL_AGENT_URL."
+    fi
+else
+    warn "MESHCENTRAL_AGENT_URL não configurado. Pulando MeshCentral Agent."
 fi
 
 step "Verificando instalação anterior"

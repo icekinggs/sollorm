@@ -35,5 +35,14 @@ class Settings(BaseSettings):
     # Versão atual recomendada (atualize quando publicar nova release)
     agent_current_version: str = "v0.4.0"
 
+    # ---------- MeshCentral ----------
+    # URL usada pelo botão "Conectar" e pelos endpoints para acessar o MeshCentral.
+    meshcentral_public_url: str = "https://localhost:8443"
+
+    # URLs opcionais dos agentes geradas dentro do MeshCentral em "Add Agent".
+    # Quando vazias, os instaladores SolloRMM pulam a instalação do Mesh Agent.
+    meshcentral_agent_linux_url: str = ""
+    meshcentral_agent_windows_url: str = ""
+
 
 settings = Settings()

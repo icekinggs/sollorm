@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Ylianst/MeshCentral/master/meshcentral-config-schema.json",
+  "settings": {
+    "cert": "localhost",
+    "WANonly": true,
+    "port": 443,
+    "aliasPort": 8443,
+    "redirPort": 80,
+    "redirAliasPort": 8086,
+    "AgentPong": 300,
+    "tlsOffload": false,
+    "SelfUpdate": false,
+    "AllowFraming": true,
+    "WebRTC": false
+  },
+  "domains": {
+    "": {
+      "title": "SolloRMM Remote Access",
+      "title2": "MeshCentral",
+      "minify": false,
+      "NewAccounts": true,
+      "localSessionRecording": true
+    }
+  }
+}

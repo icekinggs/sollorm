@@ -50,6 +50,8 @@ def _build_token_out(token: AgentToken) -> AgentTokenOut:
 def _build_install_command(platform: str, raw_token: str) -> tuple[str, str]:
     """Retorna (oneliner, script_url) para a plataforma."""
     base = settings.public_backend_url.rstrip("/")
+    mesh_linux_url = settings.meshcentral_agent_linux_url.strip()
+    mesh_windows_url = settings.meshcentral_agent_windows_url.strip()
 
     if platform == "windows":
         script_url = f"{base}/install/windows.ps1"
@@ -58,13 +60,15 @@ def _build_install_command(platform: str, raw_token: str) -> tuple[str, str]:
         oneliner = (
             f"$env:SOLLORM_TOKEN='{raw_token}'; "
             f"$env:SOLLORM_SERVER='{base}'; "
+            f"$env:MESHCENTRAL_AGENT_URL='{mesh_windows_url}'; "
             f"iwr -useb {script_url} | iex"
         )
     else:  # linux/darwin
         script_url = f"{base}/install/linux.sh"
         oneliner = (
             f"curl -fsSL {script_url} | "
-            f"sudo SOLLORM_TOKEN='{raw_token}' SOLLORM_SERVER='{base}' bash"
+            f"sudo SOLLORM_TOKEN='{raw_token}' SOLLORM_SERVER='{base}' "
+            f"MESHCENTRAL_AGENT_URL='{mesh_linux_url}' bash"
         )
 
     return oneliner, script_url

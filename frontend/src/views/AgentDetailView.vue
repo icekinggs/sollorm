@@ -90,6 +90,11 @@ function executionSeverity(status) {
   return 'danger'
 }
 
+function openRemoteAccess() {
+  if (!agent.value?.remote_access_url) return
+  window.open(agent.value.remote_access_url, '_blank', 'noopener,noreferrer')
+}
+
 async function runScript() {
   if (!scriptForm.value.script.trim()) {
     toast.add({
@@ -197,6 +202,13 @@ onUnmounted(() => {
         :severity="agent.is_online ? 'success' : 'secondary'"
       />
       <div class="header-spacer"></div>
+      <Button
+        v-if="agent?.remote_access_url"
+        label="Conectar"
+        icon="pi pi-external-link"
+        outlined
+        @click="openRemoteAccess"
+      />
       <Button
         v-if="agent"
         label="Apagar agente"

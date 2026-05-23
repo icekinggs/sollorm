@@ -32,6 +32,22 @@ services:
       timeout: 5s
       retries: 5
 
+  meshcentral:
+    image: ghcr.io/ylianst/meshcentral:latest
+    container_name: sollorm-meshcentral
+    restart: unless-stopped
+    environment:
+      - DYNAMIC_CONFIG=false
+    volumes:
+      - sollorm_meshcentral_data:/opt/meshcentral/meshcentral-data
+      - ./meshcentral-config.json:/opt/meshcentral/meshcentral-data/config.json:ro
+      - sollorm_meshcentral_files:/opt/meshcentral/meshcentral-files
+      - sollorm_meshcentral_web:/opt/meshcentral/meshcentral-web
+      - sollorm_meshcentral_backups:/opt/meshcentral/meshcentral-backups
+    ports:
+      - "8086:80"
+      - "8443:443"
+
   backend:
     build:
       context: ../backend
@@ -52,6 +68,9 @@ services:
       GITHUB_REPO: ${GITHUB_REPO:-icekinggs/sollorm}
       AGENT_CURRENT_VERSION: ${AGENT_CURRENT_VERSION:-v0.4.0}
       ALLOW_LEGACY_MASTER_TOKEN: ${ALLOW_LEGACY_MASTER_TOKEN:-true}
+      MESHCENTRAL_PUBLIC_URL: ${MESHCENTRAL_PUBLIC_URL:-https://localhost:8443}
+      MESHCENTRAL_AGENT_LINUX_URL: ${MESHCENTRAL_AGENT_LINUX_URL:-}
+      MESHCENTRAL_AGENT_WINDOWS_URL: ${MESHCENTRAL_AGENT_WINDOWS_URL:-}
     ports:
       - "8000:8000"
 
@@ -74,3 +93,7 @@ services:
 volumes:
   sollorm_db_data:
   sollorm_redis_data:
+  sollorm_meshcentral_data:
+  sollorm_meshcentral_files:
+  sollorm_meshcentral_web:
+  sollorm_meshcentral_backups:
