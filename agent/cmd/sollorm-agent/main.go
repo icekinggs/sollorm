@@ -35,15 +35,16 @@ func main() {
 	stopCmd := flag.Bool("stop", false, "Parar serviço")
 	versionFlag := flag.Bool("version", false, "Mostrar versão e sair")
 	// Internal flags used by the screen-capture helper subprocess (Session 0 workaround)
-	screenHelperPipe    := flag.String("screen-helper", "", "")
-	screenHelperFPS     := flag.Int("screen-helper-fps", 10, "")
-	screenHelperQuality := flag.Int("screen-helper-quality", 65, "")
+	screenHelperPipe      := flag.String("screen-helper", "", "")
+	screenHelperInputPipe := flag.String("screen-input-pipe", "", "")
+	screenHelperFPS       := flag.Int("screen-helper-fps", 10, "")
+	screenHelperQuality   := flag.Int("screen-helper-quality", 65, "")
 	flag.Parse()
 
 	// Screen-capture helper mode: spawned by the service in the interactive session.
 	// Must be handled before any other initialization.
 	if *screenHelperPipe != "" {
-		remote.RunScreenHelper(*screenHelperPipe, *screenHelperFPS, *screenHelperQuality)
+		remote.RunScreenHelper(*screenHelperPipe, *screenHelperInputPipe, *screenHelperFPS, *screenHelperQuality)
 		return
 	}
 

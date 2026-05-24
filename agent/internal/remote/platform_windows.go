@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -201,15 +202,46 @@ func captureLoopDirect(ctx context.Context, fps, quality int, send FrameSender) 
 // Named pipe frame format: [jpegLen uint32 LE][width uint32 LE][height uint32 LE][JPEG bytes]
 
 const (
-	pipeAccessInbound = 0x00000001
-	pipeTypeByte      = 0x00000000
-	pipeWait          = 0x00000000
-	fileGenericWrite  = 0x40000000
-	fileOpenExisting  = 3
-	fileAttrNormal    = 0x00000080
-	invalidHandle     = ^uintptr(0)
-	createNoWindow    = 0x08000000
+	pipeAccessInbound  = 0x00000001
+	pipeAccessOutbound = 0x00000002
+	pipeTypeByte       = 0x00000000
+	pipeWait           = 0x00000000
+	fileGenericRead    = 0x80000000
+	fileGenericWrite   = 0x40000000
+	fileOpenExisting   = 3
+	fileAttrNormal     = 0x00000080
+	invalidHandle      = ^uintptr(0)
+	createNoWindow     = 0x08000000
 )
+
+// helperInputPipeH holds the write end of the input command pipe when running
+// via subprocess (Session 0). Zero means direct SendInput is safe.
+var (
+	helperInputPipeMu sync.Mutex
+	helperInputPipeH  uintptr
+)
+
+// writeInputCmd serialises cmd as length-prefixed JSON and writes it to the
+// helper's input pipe. Called from injectMouse / injectKey when in Session 0.
+func writeInputCmd(cmd map[string]any) {
+	helperInputPipeMu.Lock()
+	h := helperInputPipeH
+	helperInputPipeMu.Unlock()
+	if h == 0 {
+		return
+	}
+	data, err := json.Marshal(cmd)
+	if err != nil {
+		return
+	}
+	var n uint32
+	lenBuf := make([]byte, 4)
+	binary.LittleEndian.PutUint32(lenBuf, uint32(len(data)))
+	procWriteFile.Call(h, uintptr(unsafe.Pointer(&lenBuf[0])), 4, uintptr(unsafe.Pointer(&n)), 0)
+	if len(data) > 0 {
+		procWriteFile.Call(h, uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)), uintptr(unsafe.Pointer(&n)), 0)
+	}
+}
 
 func captureLoopViaSubprocess(ctx context.Context, fps, quality int, send FrameSender) {
 	activeSession, _, _ := procWTSGetActiveConsoleSession.Call()
@@ -256,9 +288,30 @@ func captureLoopViaSubprocess(ctx context.Context, fps, quality int, send FrameS
 		return
 	}
 
-	// Close pipe handle on context cancel so blocked ReadFile/ConnectNamedPipe unblocks.
+	// Create input command pipe (service writes → helper reads → calls SendInput).
+	inputPipeName := fmt.Sprintf(`\\.\pipe\sollorm-input-%d`, os.Getpid())
+	inputPipeNameW, _ := windows.UTF16PtrFromString(inputPipeName)
+	hInputPipe, _, _ := procCreateNamedPipeW.Call(
+		uintptr(unsafe.Pointer(inputPipeNameW)),
+		pipeAccessOutbound, pipeTypeByte|pipeWait,
+		1, 4<<10, 0, 0,
+		uintptr(unsafe.Pointer(&sa)),
+	)
+	if hInputPipe == invalidHandle {
+		hInputPipe = 0 // non-fatal: input forwarding disabled
+		log.Println("remote: aviso — CreateNamedPipe (input) falhou, injeção desabilitada")
+	}
+
+	// Close pipe handles on context cancel so blocked calls unblock.
 	var closeOnce sync.Once
-	closePipe := func() { closeOnce.Do(func() { windows.CloseHandle(windows.Handle(hPipe)) }) }
+	closePipe := func() {
+		closeOnce.Do(func() {
+			windows.CloseHandle(windows.Handle(hPipe))
+			if hInputPipe != 0 {
+				windows.CloseHandle(windows.Handle(hInputPipe))
+			}
+		})
+	}
 	defer closePipe()
 
 	go func() {
@@ -269,8 +322,8 @@ func captureLoopViaSubprocess(ctx context.Context, fps, quality int, send FrameS
 	// Launch helper in the user's interactive session
 	exePath, _ := os.Executable()
 	cmdLine := fmt.Sprintf(
-		`"%s" --screen-helper "%s" --screen-helper-fps %d --screen-helper-quality %d`,
-		exePath, pipeName, fps, quality,
+		`"%s" --screen-helper "%s" --screen-input-pipe "%s" --screen-helper-fps %d --screen-helper-quality %d`,
+		exePath, pipeName, inputPipeName, fps, quality,
 	)
 	cmdLineW, _ := windows.UTF16PtrFromString(cmdLine)
 	desktopW, _ := windows.UTF16PtrFromString("winsta0\\Default")
@@ -317,6 +370,24 @@ func captureLoopViaSubprocess(ctx context.Context, fps, quality int, send FrameS
 
 	log.Println("remote: helper conectado, recebendo frames")
 
+	// Connect the input command pipe (non-blocking; missing it only disables input forwarding).
+	if hInputPipe != 0 {
+		go func() {
+			r, _, _ := procConnectNamedPipe.Call(hInputPipe, 0)
+			if r != 0 {
+				helperInputPipeMu.Lock()
+				helperInputPipeH = hInputPipe
+				helperInputPipeMu.Unlock()
+				log.Println("remote: pipe de input conectado — injeção via helper ativa")
+			}
+		}()
+		defer func() {
+			helperInputPipeMu.Lock()
+			helperInputPipeH = 0
+			helperInputPipeMu.Unlock()
+		}()
+	}
+
 	// Read frames until context or pipe error
 	header := make([]byte, 12)
 	for {
@@ -361,7 +432,7 @@ func readFullPipe(hPipe uintptr, buf []byte) bool {
 
 // RunScreenHelper is called when the binary is invoked with --screen-helper.
 // It runs in the interactive user session spawned by captureLoopViaSubprocess.
-func RunScreenHelper(pipeName string, fps, quality int) {
+func RunScreenHelper(pipeName, inputPipeName string, fps, quality int) {
 	if fps <= 0 {
 		fps = 10
 	}
@@ -392,6 +463,67 @@ func RunScreenHelper(pipeName string, fps, quality int) {
 	defer windows.CloseHandle(windows.Handle(hPipe))
 
 	log.Printf("screen-helper: conectado ao pipe, capturando a %d fps quality=%d", fps, quality)
+
+	// Connect to input command pipe and dispatch SendInput calls in a goroutine.
+	if inputPipeName != "" {
+		go func() {
+			inputPipeNameW, _ := windows.UTF16PtrFromString(inputPipeName)
+			var hInput uintptr
+			deadline := time.Now().Add(10 * time.Second)
+			for time.Now().Before(deadline) {
+				h, _, _ := procCreateFileW.Call(
+					uintptr(unsafe.Pointer(inputPipeNameW)),
+					fileGenericRead, 0, 0,
+					fileOpenExisting, fileAttrNormal, 0,
+				)
+				if h != invalidHandle {
+					hInput = h
+					break
+				}
+				time.Sleep(200 * time.Millisecond)
+			}
+			if hInput == 0 {
+				log.Println("screen-helper: falha ao conectar ao pipe de input")
+				return
+			}
+			defer windows.CloseHandle(windows.Handle(hInput))
+			log.Println("screen-helper: pipe de input conectado")
+
+			lenBuf := make([]byte, 4)
+			for {
+				if !readFullPipe(hInput, lenBuf) {
+					return
+				}
+				msgLen := binary.LittleEndian.Uint32(lenBuf)
+				if msgLen == 0 || msgLen > 1<<20 {
+					return
+				}
+				data := make([]byte, msgLen)
+				if !readFullPipe(hInput, data) {
+					return
+				}
+				var cmd map[string]any
+				if err := json.Unmarshal(data, &cmd); err != nil {
+					continue
+				}
+				switch cmd["type"] {
+				case "mouse":
+					x, _ := cmd["x"].(float64)
+					y, _ := cmd["y"].(float64)
+					event, _ := cmd["event"].(string)
+					button := 0
+					if b, ok := cmd["button"].(float64); ok {
+						button = int(b)
+					}
+					injectMouseDirect(x, y, event, button)
+				case "key":
+					code, _ := cmd["code"].(string)
+					event, _ := cmd["event"].(string)
+					injectKeyDirect(code, event)
+				}
+			}
+		}()
+	}
 
 	interval := time.Second / time.Duration(fps)
 	ticker := time.NewTicker(interval)
@@ -472,6 +604,17 @@ func callSendInput(buf []byte) {
 }
 
 func injectMouse(x, y float64, event string, button int) {
+	helperInputPipeMu.Lock()
+	h := helperInputPipeH
+	helperInputPipeMu.Unlock()
+	if h != 0 {
+		writeInputCmd(map[string]any{"type": "mouse", "x": x, "y": y, "event": event, "button": button})
+		return
+	}
+	injectMouseDirect(x, y, event, button)
+}
+
+func injectMouseDirect(x, y float64, event string, button int) {
 	dx := int32(x * 65535)
 	dy := int32(y * 65535)
 	flags := mousefAbsolute | mousefVirtualDesk | mousefMove
@@ -558,6 +701,17 @@ var jsCodeToVK = map[string]vkEntry{
 }
 
 func injectKey(code, event string) {
+	helperInputPipeMu.Lock()
+	h := helperInputPipeH
+	helperInputPipeMu.Unlock()
+	if h != 0 {
+		writeInputCmd(map[string]any{"type": "key", "code": code, "event": event})
+		return
+	}
+	injectKeyDirect(code, event)
+}
+
+func injectKeyDirect(code, event string) {
 	entry, ok := jsCodeToVK[code]
 	if !ok {
 		return

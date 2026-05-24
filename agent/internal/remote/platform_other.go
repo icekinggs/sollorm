@@ -9,4 +9,4 @@ func injectMouse(_, _ float64, _ string, _ int)               {}
 func injectKey(_, _ string)                                   {}
 
 // RunScreenHelper is a no-op on non-Windows platforms.
-func RunScreenHelper(_ string, _, _ int) {}
+func RunScreenHelper(_, _ string, _, _ int) {}
