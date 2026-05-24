@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	AgentVersion = "0.5.3"
+	AgentVersion = "0.5.4"
 	httpTimeout  = 30 * time.Second
 )
 

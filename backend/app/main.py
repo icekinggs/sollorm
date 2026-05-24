@@ -19,7 +19,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="SolloRMM API",
     description="API do sistema próprio de RMM",
-    version="0.5.3",
+    version="0.5.4",
     lifespan=lifespan,
 )
 
@@ -56,7 +56,7 @@ app.include_router(install.router)
 
 @app.get("/")
 async def root():
-    return {"name": "SolloRMM API", "version": "0.5.3", "status": "ok"}
+    return {"name": "SolloRMM API", "version": "0.5.4", "status": "ok"}
 
 
 @app.get("/health")

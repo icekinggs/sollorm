@@ -45,9 +45,11 @@ var (
 	procReadFile                   = kernel32.NewProc("ReadFile")
 	procWriteFile                  = kernel32.NewProc("WriteFile")
 	procCreateFileW                = kernel32.NewProc("CreateFileW")
-	procWTSGetActiveConsoleSession = kernel32.NewProc("WTSGetActiveConsoleSessionId")
-	procWTSQueryUserToken          = wtsapi32.NewProc("WTSQueryUserToken")
-	procCreateProcessAsUserW       = advapi32.NewProc("CreateProcessAsUserW")
+	procWTSGetActiveConsoleSession          = kernel32.NewProc("WTSGetActiveConsoleSessionId")
+	procWTSQueryUserToken                   = wtsapi32.NewProc("WTSQueryUserToken")
+	procCreateProcessAsUserW                = advapi32.NewProc("CreateProcessAsUserW")
+	procInitializeSecurityDescriptor        = advapi32.NewProc("InitializeSecurityDescriptor")
+	procSetSecurityDescriptorDacl           = advapi32.NewProc("SetSecurityDescriptorDacl")
 )
 
 // ─── GDI constants ────────────────────────────────────────────────────────────
@@ -229,13 +231,24 @@ func captureLoopViaSubprocess(ctx context.Context, fps, quality int, send FrameS
 	pipeName := fmt.Sprintf(`\\.\pipe\sollorm-screen-%d`, os.Getpid())
 	pipeNameW, _ := windows.UTF16PtrFromString(pipeName)
 
+	// NULL DACL so the interactive-session user can write to the pipe.
+	// Default DACL created by SYSTEM only grants write to admins/SYSTEM.
+	var sdBuf [256]byte // oversized buffer for SECURITY_DESCRIPTOR (40 bytes on 64-bit)
+	procInitializeSecurityDescriptor.Call(uintptr(unsafe.Pointer(&sdBuf[0])), 1)
+	procSetSecurityDescriptorDacl.Call(uintptr(unsafe.Pointer(&sdBuf[0])), 1, 0, 0) // bDaclPresent=TRUE, pDacl=NULL
+	sa := windows.SecurityAttributes{
+		Length:             uint32(unsafe.Sizeof(windows.SecurityAttributes{})),
+		SecurityDescriptor: uintptr(unsafe.Pointer(&sdBuf[0])),
+	}
+
 	hPipe, _, err := procCreateNamedPipeW.Call(
 		uintptr(unsafe.Pointer(pipeNameW)),
 		pipeAccessInbound, pipeTypeByte|pipeWait,
 		1,      // max instances
 		0,      // out buffer (read-only pipe, ignored)
 		4<<20,  // in buffer 4MB
-		0, 0,   // default timeout, null security attrs
+		0,      // default timeout
+		uintptr(unsafe.Pointer(&sa)), // NULL DACL → everyone can connect
 	)
 	if hPipe == invalidHandle {
 		log.Printf("remote: CreateNamedPipe falhou: %v", err)
