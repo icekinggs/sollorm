@@ -168,6 +168,12 @@ async def agent_websocket(
         while True:
             payload = await websocket.receive_json()
             message_type = payload.get("type")
+
+            if message_type == "remote_frame":
+                from app.routers.remote_screen import dispatch_frame  # lazy import
+                await dispatch_frame(agent_id, payload)
+                continue
+
             async with AsyncSessionLocal() as db:
                 if message_type == "script_started":
                     await _mark_execution_running(db, payload.get("execution_id", ""))

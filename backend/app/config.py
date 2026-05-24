@@ -33,7 +33,11 @@ class Settings(BaseSettings):
     github_repo: str = "icekinggs/sollorm"
 
     # Versão atual recomendada (atualize quando publicar nova release)
-    agent_current_version: str = "v0.5.0"
+    agent_current_version: str = "v0.5.2"
+
+    # ---------- Guacamole / RDP ----------
+    guacd_host: str = "guacd"
+    guacd_port: int = 4822
 
     # ---------- MeshCentral ----------
     # URL usada pelo botão "Conectar" e pelos endpoints para acessar o MeshCentral.

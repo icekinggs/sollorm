@@ -12,14 +12,16 @@ import (
 	"github.com/gorilla/websocket"
 
 	"sollorm-agent/internal/patches"
+	"sollorm-agent/internal/remote"
 )
 
 const reconnectDelay = 10 * time.Second
 
 type Client struct {
-	serverURL string
-	token     string
-	agentID   string
+	serverURL     string
+	token         string
+	agentID       string
+	remoteSession remote.Session
 }
 
 func NewClient(serverURL, token, agentID string) *Client {
@@ -109,11 +111,49 @@ func (c *Client) connectAndServe(ctx context.Context) error {
 
 		case "install_patches":
 			var cmd struct {
-				ScanID  string   `json:"scan_id"`
+				ScanID   string   `json:"scan_id"`
 				Packages []string `json:"packages"`
 			}
 			json.Unmarshal(data, &cmd)
 			go c.handlePatchInstall(ctx, cmd.ScanID, cmd.Packages, safeSend)
+
+		case "start_remote":
+			var cmd struct {
+				FPS     int `json:"fps"`
+				Quality int `json:"quality"`
+			}
+			json.Unmarshal(data, &cmd)
+			c.remoteSession.Start(cmd.FPS, cmd.Quality, func(data string, w, h int) {
+				if err := safeSend(map[string]any{
+					"type":   "remote_frame",
+					"data":   data,
+					"width":  w,
+					"height": h,
+				}); err != nil {
+					log.Printf("Erro ao enviar frame remoto: %v", err)
+				}
+			})
+
+		case "stop_remote":
+			c.remoteSession.Stop()
+
+		case "remote_mouse":
+			var cmd struct {
+				X      float64 `json:"x"`
+				Y      float64 `json:"y"`
+				Event  string  `json:"event"`
+				Button int     `json:"button"`
+			}
+			json.Unmarshal(data, &cmd)
+			c.remoteSession.InjectMouse(cmd.X, cmd.Y, cmd.Event, cmd.Button)
+
+		case "remote_key":
+			var cmd struct {
+				Code  string `json:"code"`
+				Event string `json:"event"`
+			}
+			json.Unmarshal(data, &cmd)
+			c.remoteSession.InjectKey(cmd.Code, cmd.Event)
 
 		default:
 			log.Printf("Tipo de comando desconhecido: %q", base.Type)
