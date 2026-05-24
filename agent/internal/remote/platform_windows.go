@@ -238,7 +238,7 @@ func captureLoopViaSubprocess(ctx context.Context, fps, quality int, send FrameS
 	procSetSecurityDescriptorDacl.Call(uintptr(unsafe.Pointer(&sdBuf[0])), 1, 0, 0) // bDaclPresent=TRUE, pDacl=NULL
 	sa := windows.SecurityAttributes{
 		Length:             uint32(unsafe.Sizeof(windows.SecurityAttributes{})),
-		SecurityDescriptor: uintptr(unsafe.Pointer(&sdBuf[0])),
+		SecurityDescriptor: (*windows.SECURITY_DESCRIPTOR)(unsafe.Pointer(&sdBuf[0])),
 	}
 
 	hPipe, _, err := procCreateNamedPipeW.Call(
