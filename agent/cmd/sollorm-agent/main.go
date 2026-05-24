@@ -13,6 +13,7 @@ import (
 	ksvc "github.com/kardianos/service"
 
 	"sollorm-agent/internal/config"
+	"sollorm-agent/internal/remote"
 	"sollorm-agent/internal/reporter"
 	"sollorm-agent/internal/service"
 )
@@ -33,7 +34,18 @@ func main() {
 	startCmd := flag.Bool("start", false, "Iniciar serviço")
 	stopCmd := flag.Bool("stop", false, "Parar serviço")
 	versionFlag := flag.Bool("version", false, "Mostrar versão e sair")
+	// Internal flags used by the screen-capture helper subprocess (Session 0 workaround)
+	screenHelperPipe    := flag.String("screen-helper", "", "")
+	screenHelperFPS     := flag.Int("screen-helper-fps", 10, "")
+	screenHelperQuality := flag.Int("screen-helper-quality", 65, "")
 	flag.Parse()
+
+	// Screen-capture helper mode: spawned by the service in the interactive session.
+	// Must be handled before any other initialization.
+	if *screenHelperPipe != "" {
+		remote.RunScreenHelper(*screenHelperPipe, *screenHelperFPS, *screenHelperQuality)
+		return
+	}
 
 	// Setup de logging: se rodando como serviço, escreve em arquivo;
 	// senão (foreground/dev), continua no stderr padrão.
