@@ -4,9 +4,11 @@
 
 [![Status](https://img.shields.io/badge/status-em%20desenvolvimento-yellow)]()
 [![License](https://img.shields.io/badge/license-MIT-blue)]()
+[![Release](https://img.shields.io/badge/release-v0.5.0-brightgreen)]()
 [![Go](https://img.shields.io/badge/Go-1.22-00ADD8?logo=go)]()
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python)]()
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql)]()
+[![Vue](https://img.shields.io/badge/Vue-3-42b883?logo=vuedotjs)]()
 
 ## Sobre
 
@@ -20,9 +22,9 @@ SolloRMM é uma solução de gerenciamento remoto de endpoints (Windows, Linux, 
 | Backend API | Python 3.12 + FastAPI + SQLAlchemy 2.0 (async) |
 | Banco de dados | PostgreSQL 16 |
 | Cache / Filas | Redis 7 |
-| Frontend (em breve) | Vue 3 + PrimeVue + Vite |
-| Acesso remoto (em breve) | MeshCentral integrado |
-| Mensageria (em breve) | NATS |
+| Frontend | Vue 3 + PrimeVue + Vite |
+| Acesso remoto | SSH nativo (asyncssh) + MeshCentral (RDP/VNC) |
+| Mensageria (planejado) | NATS |
 | Deploy | Docker Compose |
 
 ## Estrutura do projeto
@@ -40,11 +42,14 @@ sollorm/
 
 - [x] **Fase 1** — Agente envia heartbeat + info de hardware pro backend
 - [x] **Fase 2A** — Autenticação JWT no backend, modelo de Users
-- [ ] **Fase 2B** — Frontend Vue 3 com login + dashboard
-- [ ] **Fase 3** — Execução remota de scripts (PowerShell/Bash/Python)
-- [ ] **Fase 4** — Monitoramento ativo (checks) + alertas
-- [ ] **Fase 5** — Integração MeshCentral para acesso remoto
-- [ ] **Fase 6** — Patch management Windows via WSUS API
+- [x] **Fase 2B** — Frontend Vue 3 com login + dashboard (PrimeVue)
+- [x] **Fase 3** — Execução remota de scripts (PowerShell/Bash/Python)
+- [x] **Fase 3B** — Terminal SSH nativo via WebSocket (xterm.js + asyncssh)
+- [x] **Fase 5** — Acesso remoto: SSH integrado + MeshCentral (RDP/VNC) via iframe
+- [ ] **Fase 4** — Monitoramento ativo (checks configuráveis) + alertas
+- [ ] **Fase 6** — Patch management Windows/Linux
+- [ ] **Fase 7** — Inventário de software instalado
+- [ ] **Fase 8** — Execução agendada (scripts em cron)
 
 ## Como rodar
 
@@ -105,8 +110,12 @@ GOOS=windows GOARCH=amd64 go build -o sollorm-agent.exe
 | GET | `/api/v1/agents` | JWT | Lista agentes registrados |
 | GET | `/api/v1/agents/{id}` | JWT | Detalhes de um agente |
 | GET | `/api/v1/agents/{id}/heartbeats` | JWT | Histórico de heartbeats |
+| DELETE | `/api/v1/agents/{id}` | JWT | Remove agente e histórico |
+| WS | `/api/v1/agents/{id}/ssh` | JWT (query) | Terminal SSH nativo via WebSocket |
 | POST | `/api/v1/agents/system-info` | Agent Token | Agente envia info de SO/hardware |
 | POST | `/api/v1/agents/heartbeat` | Agent Token | Agente envia métricas |
+| GET | `/api/v1/agents/{id}/executions` | JWT | Histórico de execuções |
+| POST | `/api/v1/agents/{id}/executions` | JWT | Dispara execução remota de script |
 
 Documentação interativa completa em `/docs` (Swagger UI).
 

@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
+import { useConfirm } from 'primevue/useconfirm'
 import { agentsApi } from '@/api/agents'
 import {
   formatBytes,
@@ -16,13 +17,18 @@ import Tag from 'primevue/tag'
 import ProgressSpinner from 'primevue/progressspinner'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
-import { useConfirm } from 'primevue/useconfirm'
 import ConfirmDialog from 'primevue/confirmdialog'
 import Select from 'primevue/select'
 import Textarea from 'primevue/textarea'
 import InputNumber from 'primevue/inputnumber'
-import InputText from 'primevue/inputtext'
-import Password from 'primevue/password'
+import Tabs from 'primevue/tabs'
+import TabList from 'primevue/tablist'
+import Tab from 'primevue/tab'
+import TabPanels from 'primevue/tabpanels'
+import TabPanel from 'primevue/tabpanel'
+
+import SshTerminal from '@/components/SshTerminal.vue'
+import MeshCentralPanel from '@/components/MeshCentralPanel.vue'
 
 const props = defineProps({
   id: { type: String, required: true }
@@ -31,26 +37,16 @@ const props = defineProps({
 const router = useRouter()
 const toast = useToast()
 const confirm = useConfirm()
-const deleting = ref(false)
 
 const agent = ref(null)
 const heartbeats = ref([])
 const executions = ref([])
 const loading = ref(true)
-const refreshInterval = ref(null)
+const deleting = ref(false)
 const executing = ref(false)
-const sshVisible = ref(false)
-const sshConnecting = ref(false)
-const sshConnected = ref(false)
-const sshOutput = ref('')
-const sshInput = ref('')
-const sshSocket = ref(null)
-const sshForm = ref({
-  host: '',
-  port: 22,
-  username: '',
-  password: ''
-})
+const refreshInterval = ref(null)
+const activeAccessTab = ref('0')
+
 const scriptForm = ref({
   language: 'bash',
   script: 'hostname\nwhoami',
@@ -64,6 +60,16 @@ const scriptLanguages = [
 ]
 
 const lastHeartbeat = computed(() => heartbeats.value[0] || null)
+const isWindows = computed(() => agent.value?.os === 'windows')
+const hasRemoteAccess = computed(() => !!agent.value?.remote_access_url)
+const hasSSH = computed(() => !isWindows.value)
+
+const osIcon = computed(() => {
+  const os = agent.value?.os
+  if (os === 'windows') return 'pi-microsoft'
+  if (os === 'darwin') return 'pi-apple'
+  return 'pi-server'
+})
 
 async function loadData() {
   try {
@@ -75,25 +81,12 @@ async function loadData() {
     agent.value = agentRes.data
     heartbeats.value = hbRes.data
     executions.value = execRes.data
-    if (!sshForm.value.host) {
-      sshForm.value.host = agentRes.data.hostname || ''
-    }
   } catch (err) {
     if (err.response?.status === 404) {
-      toast.add({
-        severity: 'error',
-        summary: 'Não encontrado',
-        detail: 'Agente não existe',
-        life: 3000
-      })
+      toast.add({ severity: 'error', summary: 'Não encontrado', detail: 'Agente não existe', life: 3000 })
       router.push('/dashboard')
     } else {
-      toast.add({
-        severity: 'error',
-        summary: 'Erro',
-        detail: 'Falha ao carregar dados do agente',
-        life: 4000
-      })
+      toast.add({ severity: 'error', summary: 'Erro', detail: 'Falha ao carregar dados', life: 4000 })
     }
   } finally {
     loading.value = false
@@ -107,111 +100,11 @@ function executionSeverity(status) {
   return 'danger'
 }
 
-function openRemoteAccess() {
-  sshVisible.value = true
-}
-
-function sshWebSocketUrl() {
-  const token = localStorage.getItem('sollorm_token')
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const host = `${window.location.hostname}:8000`
-  const query = new URLSearchParams({ token })
-  return `${protocol}//${host}/api/v1/agents/${props.id}/ssh?${query.toString()}`
-}
-
-function appendSshOutput(text) {
-  sshOutput.value += text
-}
-
-function connectSsh() {
-  if (!sshForm.value.host || !sshForm.value.username) {
-    toast.add({
-      severity: 'warn',
-      summary: 'SSH incompleto',
-      detail: 'Informe host e usuário',
-      life: 3000
-    })
-    return
-  }
-
-  disconnectSsh(false)
-  sshConnecting.value = true
-  sshOutput.value = ''
-
-  const socket = new WebSocket(sshWebSocketUrl())
-  sshSocket.value = socket
-
-  socket.onopen = () => {
-    socket.send(JSON.stringify({
-      type: 'connect',
-      host: sshForm.value.host,
-      port: sshForm.value.port,
-      username: sshForm.value.username,
-      password: sshForm.value.password
-    }))
-  }
-
-  socket.onmessage = (event) => {
-    const message = JSON.parse(event.data)
-    if (message.type === 'connected') {
-      sshConnecting.value = false
-      sshConnected.value = true
-      appendSshOutput('SSH conectado.\n')
-    } else if (message.type === 'output') {
-      appendSshOutput(message.data)
-    } else if (message.type === 'error') {
-      sshConnecting.value = false
-      appendSshOutput(`\n${message.message}\n`)
-    }
-  }
-
-  socket.onerror = () => {
-    sshConnecting.value = false
-    appendSshOutput('\nErro na conexão SSH.\n')
-  }
-
-  socket.onclose = () => {
-    sshConnecting.value = false
-    sshConnected.value = false
-    if (sshSocket.value === socket) {
-      sshSocket.value = null
-    }
-  }
-}
-
-function disconnectSsh(sendClose = true) {
-  if (sshSocket.value) {
-    if (sendClose && sshSocket.value.readyState === WebSocket.OPEN) {
-      sshSocket.value.send(JSON.stringify({ type: 'disconnect' }))
-    }
-    sshSocket.value.close()
-  }
-  sshSocket.value = null
-  sshConnecting.value = false
-  sshConnected.value = false
-}
-
-function sendSshInput() {
-  if (!sshConnected.value || !sshSocket.value || !sshInput.value) return
-  sshSocket.value.send(JSON.stringify({
-    type: 'input',
-    data: `${sshInput.value}\n`
-  }))
-  appendSshOutput(`$ ${sshInput.value}\n`)
-  sshInput.value = ''
-}
-
 async function runScript() {
   if (!scriptForm.value.script.trim()) {
-    toast.add({
-      severity: 'warn',
-      summary: 'Script vazio',
-      detail: 'Digite um script para executar',
-      life: 3000
-    })
+    toast.add({ severity: 'warn', summary: 'Script vazio', detail: 'Digite um script para executar', life: 3000 })
     return
   }
-
   executing.value = true
   try {
     await agentsApi.createExecution(props.id, {
@@ -219,20 +112,10 @@ async function runScript() {
       script: scriptForm.value.script,
       timeout_seconds: scriptForm.value.timeout_seconds
     })
-    toast.add({
-      severity: 'success',
-      summary: 'Execução criada',
-      detail: 'O comando foi enviado para o agente',
-      life: 3000
-    })
+    toast.add({ severity: 'success', summary: 'Execução criada', detail: 'Comando enviado ao agente', life: 3000 })
     await loadData()
   } catch (err) {
-    toast.add({
-      severity: 'error',
-      summary: 'Erro',
-      detail: err.response?.data?.detail || 'Falha ao executar script',
-      life: 4000
-    })
+    toast.add({ severity: 'error', summary: 'Erro', detail: err.response?.data?.detail || 'Falha ao executar', life: 4000 })
   } finally {
     executing.value = false
   }
@@ -240,16 +123,8 @@ async function runScript() {
 
 function handleDelete() {
   if (!agent.value) return
-
   confirm.require({
-    message: `Tem certeza que deseja apagar o agente "${agent.value.hostname}"?
-
-Isso vai:
-- Apagar todo o histórico de heartbeats
-- Apagar o token de instalação
-- A máquina vai parar de reportar até ser reinstalada
-
-Esta ação NÃO pode ser desfeita.`,
+    message: `Tem certeza que deseja apagar "${agent.value.hostname}"?\n\nEsta ação vai remover o histórico de heartbeats e o token de instalação. Não pode ser desfeita.`,
     header: 'Confirmar exclusão',
     icon: 'pi pi-exclamation-triangle',
     acceptClass: 'p-button-danger',
@@ -259,22 +134,12 @@ Esta ação NÃO pode ser desfeita.`,
       deleting.value = true
       try {
         await agentsApi.delete(props.id)
-        toast.add({
-          severity: 'success',
-          summary: 'Agente apagado',
-          detail: `"${agent.value.hostname}" foi removido do sistema`,
-          life: 3000
-        })
+        toast.add({ severity: 'success', summary: 'Agente apagado', detail: `"${agent.value.hostname}" removido`, life: 3000 })
         if (refreshInterval.value) clearInterval(refreshInterval.value)
         router.push('/dashboard')
       } catch (err) {
         deleting.value = false
-        toast.add({
-          severity: 'error',
-          summary: 'Erro',
-          detail: err.response?.data?.detail || 'Falha ao apagar agente',
-          life: 4000
-        })
+        toast.add({ severity: 'error', summary: 'Erro', detail: err.response?.data?.detail || 'Falha ao apagar', life: 4000 })
       }
     }
   })
@@ -287,316 +152,316 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (refreshInterval.value) clearInterval(refreshInterval.value)
-  disconnectSsh()
 })
 </script>
 
 <template>
   <div class="agent-detail">
-    <div class="page-header">
-      <Button
-        icon="pi pi-arrow-left"
-        text
-        rounded
-        @click="router.push('/dashboard')"
-        aria-label="Voltar"
-      />
-      <h2 v-if="agent">{{ agent.hostname }}</h2>
-      <h2 v-else>Carregando...</h2>
-      <Tag
-        v-if="agent"
-        :value="agent.is_online ? 'Online' : 'Offline'"
-        :severity="agent.is_online ? 'success' : 'secondary'"
-      />
-      <div class="header-spacer"></div>
-      <Button
-        v-if="agent?.os !== 'windows'"
-        label="Conectar SSH"
-        icon="pi pi-terminal"
-        outlined
-        @click="openRemoteAccess"
-      />
-      <Button
-        v-if="agent"
-        label="Apagar agente"
-        icon="pi pi-trash"
-        severity="danger"
-        outlined
-        :loading="deleting"
-        @click="handleDelete"
-      />
-    </div>
-    <ConfirmDialog />
 
+    <!-- Loading -->
     <div v-if="loading" class="loading-state">
-      <ProgressSpinner style="width: 32px; height: 32px" stroke-width="4" />
+      <ProgressSpinner style="width: 36px; height: 36px" stroke-width="3" />
+      <span class="text-muted">Carregando agente...</span>
     </div>
 
-    <div v-else-if="agent" class="content-grid">
-      <div class="card">
-        <h3>Métricas atuais</h3>
-        <div v-if="lastHeartbeat" class="metrics-row">
-          <div class="metric-block">
-            <div class="metric-label">CPU</div>
-            <div class="metric-value">{{ lastHeartbeat.cpu_usage_percent.toFixed(1) }}%</div>
+    <template v-else-if="agent">
+
+      <!-- Header -->
+      <div class="page-header">
+        <Button icon="pi pi-arrow-left" text rounded @click="router.push('/dashboard')" aria-label="Voltar" />
+        <div class="header-identity">
+          <i :class="['pi', osIcon, 'os-icon']" />
+          <div>
+            <h2 class="hostname">{{ agent.hostname }}</h2>
+            <span class="platform-label text-muted">{{ agent.platform || agent.os || '—' }}</span>
+          </div>
+        </div>
+        <Tag
+          :value="agent.is_online ? 'Online' : 'Offline'"
+          :severity="agent.is_online ? 'success' : 'secondary'"
+        />
+        <div class="header-spacer" />
+        <span class="agent-version text-muted" v-if="agent.agent_version">v{{ agent.agent_version }}</span>
+        <Button
+          label="Apagar"
+          icon="pi pi-trash"
+          severity="danger"
+          text
+          :loading="deleting"
+          @click="handleDelete"
+        />
+      </div>
+
+      <ConfirmDialog />
+
+      <!-- Metrics bar -->
+      <div class="metrics-bar" v-if="lastHeartbeat">
+        <div class="metric-card">
+          <div class="metric-icon"><i class="pi pi-microchip" /></div>
+          <div class="metric-content">
+            <span class="metric-val">{{ lastHeartbeat.cpu_usage_percent.toFixed(1) }}%</span>
+            <span class="metric-label">CPU</span>
             <div class="usage-bar">
               <div
-                class="usage-bar-fill"
+                class="usage-fill"
                 :class="usageColorClass(lastHeartbeat.cpu_usage_percent)"
                 :style="{ width: lastHeartbeat.cpu_usage_percent + '%' }"
-              ></div>
+              />
             </div>
           </div>
-          <div class="metric-block">
-            <div class="metric-label">RAM</div>
-            <div class="metric-value">{{ lastHeartbeat.ram_usage_percent.toFixed(1) }}%</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon"><i class="pi pi-database" /></div>
+          <div class="metric-content">
+            <span class="metric-val">{{ lastHeartbeat.ram_usage_percent.toFixed(1) }}%</span>
+            <span class="metric-label">RAM</span>
             <div class="usage-bar">
               <div
-                class="usage-bar-fill"
+                class="usage-fill"
                 :class="usageColorClass(lastHeartbeat.ram_usage_percent)"
                 :style="{ width: lastHeartbeat.ram_usage_percent + '%' }"
-              ></div>
+              />
             </div>
           </div>
-          <div class="metric-block">
-            <div class="metric-label">Disco</div>
-            <div class="metric-value">{{ lastHeartbeat.disk_usage_percent.toFixed(1) }}%</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon"><i class="pi pi-hdd" /></div>
+          <div class="metric-content">
+            <span class="metric-val">{{ lastHeartbeat.disk_usage_percent.toFixed(1) }}%</span>
+            <span class="metric-label">Disco</span>
             <div class="usage-bar">
               <div
-                class="usage-bar-fill"
+                class="usage-fill"
                 :class="usageColorClass(lastHeartbeat.disk_usage_percent)"
                 :style="{ width: lastHeartbeat.disk_usage_percent + '%' }"
-              ></div>
+              />
             </div>
           </div>
-          <div class="metric-block">
-            <div class="metric-label">Uptime</div>
-            <div class="metric-value">{{ formatUptime(lastHeartbeat.uptime_seconds) }}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-icon"><i class="pi pi-clock" /></div>
+          <div class="metric-content">
+            <span class="metric-val">{{ formatUptime(lastHeartbeat.uptime_seconds) }}</span>
+            <span class="metric-label">Uptime</span>
           </div>
         </div>
-        <p v-else class="text-muted">Nenhum heartbeat recebido ainda.</p>
-      </div>
-
-      <div class="card">
-        <h3>Informações do sistema</h3>
-        <table class="info-table">
-          <tbody>
-            <tr>
-              <td class="text-muted">ID</td>
-              <td class="mono">{{ agent.id }}</td>
-            </tr>
-            <tr>
-              <td class="text-muted">Sistema</td>
-              <td>{{ agent.platform || '—' }}</td>
-            </tr>
-            <tr>
-              <td class="text-muted">SO</td>
-              <td>{{ agent.os || '—' }}</td>
-            </tr>
-            <tr>
-              <td class="text-muted">CPU</td>
-              <td>{{ agent.cpu_model || '—' }} ({{ agent.cpu_cores }} cores)</td>
-            </tr>
-            <tr>
-              <td class="text-muted">RAM total</td>
-              <td>{{ formatBytes(agent.ram_total_bytes) }}</td>
-            </tr>
-            <tr>
-              <td class="text-muted">Disco total</td>
-              <td>{{ formatBytes(agent.disk_total_bytes) }}</td>
-            </tr>
-            <tr>
-              <td class="text-muted">Versão do agente</td>
-              <td>{{ agent.agent_version || '—' }}</td>
-            </tr>
-            <tr>
-              <td class="text-muted">Primeira conexão</td>
-              <td>{{ formatDateTime(agent.first_seen) }}</td>
-            </tr>
-            <tr>
-              <td class="text-muted">Última conexão</td>
-              <td>{{ formatRelativeDate(agent.last_seen) }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div class="card full-width">
-        <h3>Acesso SSH</h3>
-        <div v-if="sshVisible" class="ssh-panel">
-          <div class="ssh-toolbar">
-            <InputText
-              v-model="sshForm.host"
-              placeholder="Host ou IP"
-              class="ssh-host"
-            />
-            <InputNumber
-              v-model="sshForm.port"
-              :min="1"
-              :max="65535"
-              class="ssh-port"
-            />
-            <InputText
-              v-model="sshForm.username"
-              placeholder="Usuário"
-              class="ssh-user"
-            />
-            <Password
-              v-model="sshForm.password"
-              placeholder="Senha"
-              :feedback="false"
-              toggle-mask
-              class="ssh-password"
-            />
-            <Button
-              v-if="!sshConnected"
-              label="Conectar"
-              icon="pi pi-link"
-              :loading="sshConnecting"
-              @click="connectSsh"
-            />
-            <Button
-              v-else
-              label="Desconectar"
-              icon="pi pi-times"
-              severity="secondary"
-              outlined
-              @click="disconnectSsh"
-            />
-          </div>
-          <pre class="ssh-terminal mono">{{ sshOutput || 'Aguardando conexão SSH...' }}</pre>
-          <div class="ssh-input-row">
-            <InputText
-              v-model="sshInput"
-              placeholder="Digite um comando e pressione Enter"
-              :disabled="!sshConnected"
-              fluid
-              @keyup.enter="sendSshInput"
-            />
-            <Button
-              icon="pi pi-send"
-              :disabled="!sshConnected"
-              @click="sendSshInput"
-              aria-label="Enviar comando SSH"
-            />
+        <div class="metric-card">
+          <div class="metric-icon"><i class="pi pi-desktop" /></div>
+          <div class="metric-content">
+            <span class="metric-val">{{ agent.cpu_cores ?? '—' }}</span>
+            <span class="metric-label">Cores</span>
           </div>
         </div>
-        <p v-else class="text-muted">Clique em Conectar SSH para abrir uma sessão nativa no navegador.</p>
-      </div>
-
-      <div class="card full-width">
-        <h3>Execução remota</h3>
-        <div class="script-runner">
-          <div class="script-toolbar">
-            <Select
-              v-model="scriptForm.language"
-              :options="scriptLanguages"
-              option-label="label"
-              option-value="value"
-              class="language-select"
-            />
-            <InputNumber
-              v-model="scriptForm.timeout_seconds"
-              :min="1"
-              :max="3600"
-              suffix="s"
-              show-buttons
-              class="timeout-input"
-            />
-            <Button
-              label="Executar"
-              icon="pi pi-play"
-              :loading="executing"
-              @click="runScript"
-            />
+        <div class="metric-card">
+          <div class="metric-icon"><i class="pi pi-bookmark" /></div>
+          <div class="metric-content">
+            <span class="metric-val">{{ formatBytes(agent.ram_total_bytes) }}</span>
+            <span class="metric-label">RAM Total</span>
           </div>
-          <Textarea
-            v-model="scriptForm.script"
-            rows="8"
-            auto-resize
-            class="script-editor mono"
-          />
         </div>
       </div>
 
-      <div class="card full-width">
-        <h3>Histórico de execuções</h3>
-        <DataTable
-          :value="executions"
-          :rows="20"
-          striped-rows
-          class="execution-table"
-        >
-          <Column field="created_at" header="Criado em" style="width: 190px">
-            <template #body="{ data }">
-              {{ formatDateTime(data.created_at) }}
-            </template>
-          </Column>
-          <Column field="language" header="Tipo" style="width: 120px">
-            <template #body="{ data }">
-              <code class="mono">{{ data.language }}</code>
-            </template>
-          </Column>
-          <Column field="status" header="Status" style="width: 130px">
-            <template #body="{ data }">
-              <Tag :value="data.status" :severity="executionSeverity(data.status)" />
-            </template>
-          </Column>
-          <Column field="exit_code" header="Exit" style="width: 80px">
-            <template #body="{ data }">
-              {{ data.exit_code ?? '—' }}
-            </template>
-          </Column>
-          <Column header="Saída">
-            <template #body="{ data }">
-              <div class="execution-output">
-                <pre v-if="data.stdout" class="mono">{{ data.stdout }}</pre>
-                <pre v-if="data.stderr" class="mono stderr">{{ data.stderr }}</pre>
-                <span v-if="!data.stdout && !data.stderr" class="text-muted">
-                  {{ data.error_message || 'Sem saída ainda' }}
-                </span>
-              </div>
-            </template>
-          </Column>
-        </DataTable>
+      <!-- No heartbeat yet -->
+      <div v-else class="no-metrics-banner text-muted">
+        <i class="pi pi-info-circle" />
+        Aguardando primeiro heartbeat do agente...
       </div>
 
-      <div class="card full-width">
-        <h3>Histórico recente de heartbeats</h3>
-        <DataTable
-          :value="heartbeats"
-          :rows="20"
-          striped-rows
-          class="hb-table"
-        >
-          <Column field="received_at" header="Recebido em" style="width: 200px">
-            <template #body="{ data }">
-              {{ formatDateTime(data.received_at) }}
+      <!-- Main grid -->
+      <div class="main-grid">
+
+        <!-- System info -->
+        <div class="card info-card">
+          <div class="card-header">
+            <i class="pi pi-info-circle" />
+            <h3>Informações do sistema</h3>
+          </div>
+          <table class="info-table">
+            <tbody>
+              <tr>
+                <td>Sistema</td>
+                <td>{{ agent.platform || '—' }}</td>
+              </tr>
+              <tr>
+                <td>SO</td>
+                <td>{{ agent.os || '—' }}</td>
+              </tr>
+              <tr>
+                <td>CPU</td>
+                <td>{{ agent.cpu_model || '—' }}</td>
+              </tr>
+              <tr>
+                <td>RAM</td>
+                <td>{{ formatBytes(agent.ram_total_bytes) }}</td>
+              </tr>
+              <tr>
+                <td>Disco</td>
+                <td>{{ formatBytes(agent.disk_total_bytes) }}</td>
+              </tr>
+              <tr>
+                <td>Versão agente</td>
+                <td class="mono">{{ agent.agent_version || '—' }}</td>
+              </tr>
+              <tr>
+                <td>Primeira conexão</td>
+                <td>{{ formatDateTime(agent.first_seen) }}</td>
+              </tr>
+              <tr>
+                <td>Última conexão</td>
+                <td>{{ formatRelativeDate(agent.last_seen) }}</td>
+              </tr>
+              <tr class="last-row">
+                <td>ID</td>
+                <td class="mono id-cell" :title="agent.id">{{ agent.id }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Script execution -->
+        <div class="card script-card">
+          <div class="card-header">
+            <i class="pi pi-code" />
+            <h3>Execução remota</h3>
+          </div>
+          <div class="script-runner">
+            <div class="script-toolbar">
+              <Select
+                v-model="scriptForm.language"
+                :options="scriptLanguages"
+                option-label="label"
+                option-value="value"
+                class="lang-select"
+              />
+              <InputNumber
+                v-model="scriptForm.timeout_seconds"
+                :min="1"
+                :max="3600"
+                suffix="s"
+                show-buttons
+                class="timeout-input"
+              />
+              <Button label="Executar" icon="pi pi-play" :loading="executing" @click="runScript" />
+            </div>
+            <Textarea
+              v-model="scriptForm.script"
+              rows="6"
+              auto-resize
+              class="script-editor mono"
+            />
+          </div>
+        </div>
+
+        <!-- Remote access — tabs -->
+        <div class="card access-card full-width">
+          <div class="card-header">
+            <i class="pi pi-plug" />
+            <h3>Acesso Remoto</h3>
+          </div>
+
+          <Tabs v-model:value="activeAccessTab">
+            <TabList>
+              <Tab v-if="hasSSH" value="0">
+                <i class="pi pi-terminal tab-icon" />
+                Terminal SSH
+              </Tab>
+              <Tab v-if="hasRemoteAccess" value="1">
+                <i class="pi pi-desktop tab-icon" />
+                Remote Desktop
+              </Tab>
+            </TabList>
+            <TabPanels>
+              <TabPanel v-if="hasSSH" value="0">
+                <SshTerminal :agent-id="agent.id" :hostname="agent.hostname" />
+              </TabPanel>
+              <TabPanel v-if="hasRemoteAccess" value="1">
+                <MeshCentralPanel :url="agent.remote_access_url" :agent-name="agent.hostname" />
+              </TabPanel>
+            </TabPanels>
+          </Tabs>
+
+          <!-- Windows with no MeshCentral -->
+          <div v-if="isWindows && !hasRemoteAccess" class="no-access-notice">
+            <i class="pi pi-info-circle" />
+            <div>
+              <strong>Remote Desktop não configurado</strong>
+              <p class="text-muted">
+                Defina <code>MESHCENTRAL_PUBLIC_URL</code> no <code>deploy/.env</code> e instale o
+                agente MeshCentral no host para habilitar acesso remoto Windows.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Execution history -->
+        <div class="card full-width">
+          <div class="card-header">
+            <i class="pi pi-history" />
+            <h3>Histórico de execuções</h3>
+          </div>
+          <DataTable :value="executions" :rows="20" striped-rows>
+            <template #empty>
+              <div class="table-empty">Nenhuma execução registrada ainda.</div>
             </template>
-          </Column>
-          <Column field="cpu_usage_percent" header="CPU">
-            <template #body="{ data }">
-              {{ data.cpu_usage_percent.toFixed(1) }}%
+            <Column field="created_at" header="Criado em" style="width: 190px">
+              <template #body="{ data }">{{ formatDateTime(data.created_at) }}</template>
+            </Column>
+            <Column field="language" header="Tipo" style="width: 120px">
+              <template #body="{ data }"><code class="mono">{{ data.language }}</code></template>
+            </Column>
+            <Column field="status" header="Status" style="width: 130px">
+              <template #body="{ data }">
+                <Tag :value="data.status" :severity="executionSeverity(data.status)" />
+              </template>
+            </Column>
+            <Column field="exit_code" header="Exit" style="width: 80px">
+              <template #body="{ data }">{{ data.exit_code ?? '—' }}</template>
+            </Column>
+            <Column header="Saída">
+              <template #body="{ data }">
+                <div class="exec-output">
+                  <pre v-if="data.stdout" class="mono">{{ data.stdout }}</pre>
+                  <pre v-if="data.stderr" class="mono stderr">{{ data.stderr }}</pre>
+                  <span v-if="!data.stdout && !data.stderr" class="text-muted">
+                    {{ data.error_message || 'Sem saída ainda' }}
+                  </span>
+                </div>
+              </template>
+            </Column>
+          </DataTable>
+        </div>
+
+        <!-- Heartbeat history -->
+        <div class="card full-width">
+          <div class="card-header">
+            <i class="pi pi-chart-line" />
+            <h3>Histórico de heartbeats</h3>
+          </div>
+          <DataTable :value="heartbeats" :rows="20" striped-rows>
+            <template #empty>
+              <div class="table-empty">Nenhum heartbeat recebido ainda.</div>
             </template>
-          </Column>
-          <Column field="ram_usage_percent" header="RAM">
-            <template #body="{ data }">
-              {{ data.ram_usage_percent.toFixed(1) }}%
-            </template>
-          </Column>
-          <Column field="disk_usage_percent" header="Disco">
-            <template #body="{ data }">
-              {{ data.disk_usage_percent.toFixed(1) }}%
-            </template>
-          </Column>
-          <Column field="uptime_seconds" header="Uptime">
-            <template #body="{ data }">
-              {{ formatUptime(data.uptime_seconds) }}
-            </template>
-          </Column>
-        </DataTable>
+            <Column field="received_at" header="Recebido em" style="width: 200px">
+              <template #body="{ data }">{{ formatDateTime(data.received_at) }}</template>
+            </Column>
+            <Column field="cpu_usage_percent" header="CPU" style="width: 100px">
+              <template #body="{ data }">{{ data.cpu_usage_percent.toFixed(1) }}%</template>
+            </Column>
+            <Column field="ram_usage_percent" header="RAM" style="width: 100px">
+              <template #body="{ data }">{{ data.ram_usage_percent.toFixed(1) }}%</template>
+            </Column>
+            <Column field="disk_usage_percent" header="Disco" style="width: 100px">
+              <template #body="{ data }">{{ data.disk_usage_percent.toFixed(1) }}%</template>
+            </Column>
+            <Column field="uptime_seconds" header="Uptime">
+              <template #body="{ data }">{{ formatUptime(data.uptime_seconds) }}</template>
+            </Column>
+          </DataTable>
+        </div>
+
       </div>
-    </div>
+    </template>
+
   </div>
 </template>
 
@@ -604,31 +469,140 @@ onUnmounted(() => {
 .agent-detail {
   display: flex;
   flex-direction: column;
+  gap: 1.25rem;
 }
 
+/* Loading */
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 5rem;
+  gap: 1rem;
+}
+
+/* Header */
 .page-header {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  margin-bottom: 1.5rem;
 }
 
-.header-spacer {
-  flex: 1;
-}
-
-.page-header h2 {
-  font-size: 1.5rem;
-  font-weight: 600;
-}
-
-.loading-state {
+.header-identity {
   display: flex;
-  justify-content: center;
-  padding: 4rem;
+  align-items: center;
+  gap: 0.75rem;
 }
 
-.content-grid {
+.os-icon {
+  font-size: 1.5rem;
+  color: var(--p-text-muted-color);
+}
+
+.hostname {
+  font-size: 1.4rem;
+  font-weight: 700;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.platform-label {
+  font-size: 0.8rem;
+}
+
+.header-spacer { flex: 1; }
+
+.agent-version {
+  font-size: 0.8rem;
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
+}
+
+/* Metrics bar */
+.metrics-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.75rem;
+}
+
+.metric-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 10px;
+  padding: 0.875rem 1rem;
+}
+
+.metric-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--p-primary-50, rgba(99,102,241,0.08));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--p-primary-color);
+  flex-shrink: 0;
+  font-size: 0.9rem;
+}
+
+.metric-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.metric-val {
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.metric-label {
+  font-size: 0.7rem;
+  color: var(--p-text-muted-color);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.usage-bar {
+  height: 3px;
+  background: var(--p-content-border-color);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 0.35rem;
+}
+
+.usage-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--p-green-500);
+  transition: width 0.4s ease;
+}
+
+.usage-fill.warn   { background: var(--p-yellow-500); }
+.usage-fill.danger { background: var(--p-red-500); }
+
+.no-metrics-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 8px;
+  font-size: 0.875rem;
+}
+
+/* Main grid */
+.main-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1rem;
@@ -637,110 +611,69 @@ onUnmounted(() => {
 .card {
   background: var(--p-content-background);
   border: 1px solid var(--p-content-border-color);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 1.25rem 1.5rem;
 }
 
-.card h3 {
-  font-size: 1rem;
-  font-weight: 600;
-  margin-bottom: 1rem;
-}
-
-.card.full-width {
+.full-width {
   grid-column: 1 / -1;
 }
 
-.metrics-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 1rem;
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--p-content-border-color);
 }
 
-.metric-block .metric-label {
-  font-size: 0.8rem;
+.card-header i {
   color: var(--p-text-muted-color);
-  margin-bottom: 0.4rem;
 }
 
-.metric-block .metric-value {
-  font-size: 1.3rem;
+.card-header h3 {
+  font-size: 0.9rem;
   font-weight: 600;
-  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--p-text-muted-color);
+  margin: 0;
 }
 
+/* Info table */
 .info-table {
   width: 100%;
   border-collapse: collapse;
+  font-size: 0.875rem;
 }
 
 .info-table td {
-  padding: 0.5rem 0;
+  padding: 0.45rem 0;
   border-bottom: 1px solid var(--p-content-border-color);
-  font-size: 0.9rem;
+  vertical-align: middle;
 }
 
 .info-table td:first-child {
-  width: 35%;
-  font-size: 0.85rem;
-}
-
-.info-table tr:last-child td {
-  border-bottom: none;
-}
-
-.mono {
-  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  width: 38%;
+  color: var(--p-text-muted-color);
   font-size: 0.8rem;
 }
 
-.ssh-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+.info-table tr.last-row td {
+  border-bottom: none;
 }
 
-.ssh-toolbar {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
+.id-cell {
+  font-size: 0.7rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+  display: block;
 }
 
-.ssh-host {
-  min-width: 180px;
-  flex: 1;
-}
-
-.ssh-port {
-  width: 110px;
-}
-
-.ssh-user {
-  width: 150px;
-}
-
-.ssh-password {
-  width: 180px;
-}
-
-.ssh-terminal {
-  min-height: 300px;
-  max-height: 460px;
-  overflow: auto;
-  margin: 0;
-  padding: 1rem;
-  border-radius: 8px;
-  background: #0b1020;
-  color: #d7e1ff;
-  border: 1px solid var(--p-content-border-color);
-  white-space: pre-wrap;
-}
-
-.ssh-input-row {
-  display: flex;
-  gap: 0.5rem;
-}
-
+/* Script runner */
 .script-runner {
   display: flex;
   flex-direction: column;
@@ -749,63 +682,92 @@ onUnmounted(() => {
 
 .script-toolbar {
   display: flex;
-  gap: 0.75rem;
+  gap: 0.625rem;
   align-items: center;
 }
 
-.language-select {
-  width: 160px;
-}
+.lang-select { width: 150px; }
+.timeout-input { width: 130px; }
 
-.timeout-input {
-  width: 140px;
-}
-
-.script-editor {
-  width: 100%;
-}
-
+.script-editor { width: 100%; }
 .script-editor :deep(textarea) {
   font-family: 'SF Mono', Monaco, Consolas, monospace;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
 }
 
-.execution-output {
-  max-height: 180px;
+/* Access tabs */
+.tab-icon {
+  margin-right: 0.4rem;
+  font-size: 0.875rem;
+}
+
+.no-access-notice {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  padding: 1rem;
+  background: var(--p-surface-100, rgba(255,255,255,0.04));
+  border-radius: 8px;
+  border: 1px solid var(--p-content-border-color);
+}
+
+.no-access-notice i {
+  color: var(--p-text-muted-color);
+  margin-top: 0.1rem;
+  flex-shrink: 0;
+}
+
+.no-access-notice p {
+  margin: 0.25rem 0 0;
+  font-size: 0.875rem;
+}
+
+/* Execution output */
+.exec-output {
+  max-height: 160px;
   overflow: auto;
 }
 
-.execution-output pre {
+.exec-output pre {
   margin: 0;
   white-space: pre-wrap;
+  font-size: 0.8rem;
 }
 
-.execution-output .stderr {
+.exec-output .stderr {
   color: var(--p-red-500);
-  margin-top: 0.5rem;
+  margin-top: 0.25rem;
 }
 
+.table-empty {
+  padding: 2rem;
+  text-align: center;
+  color: var(--p-text-muted-color);
+  font-size: 0.875rem;
+}
+
+/* Shared */
+.mono {
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
+  font-size: 0.8rem;
+}
+
+/* Responsive */
 @media (max-width: 768px) {
-  .content-grid {
+  .main-grid {
     grid-template-columns: 1fr;
   }
 
+  .metrics-bar {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
   .script-toolbar {
-    align-items: stretch;
     flex-direction: column;
+    align-items: stretch;
   }
 
-  .ssh-toolbar {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .language-select,
-  .timeout-input,
-  .ssh-host,
-  .ssh-port,
-  .ssh-user,
-  .ssh-password {
+  .lang-select, .timeout-input {
     width: 100%;
   }
 }
