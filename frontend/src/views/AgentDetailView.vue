@@ -29,6 +29,7 @@ import TabPanel from 'primevue/tabpanel'
 
 import SshTerminal from '@/components/SshTerminal.vue'
 import MeshCentralPanel from '@/components/MeshCentralPanel.vue'
+import PatchManager from '@/components/PatchManager.vue'
 
 const props = defineProps({
   id: { type: String, required: true }
@@ -391,6 +392,15 @@ onUnmounted(() => {
               </p>
             </div>
           </div>
+        </div>
+
+        <!-- Patch management -->
+        <div class="card full-width">
+          <div class="card-header">
+            <i class="pi pi-shield" />
+            <h3>Patch Management</h3>
+          </div>
+          <PatchManager :agent-id="agent.id" />
         </div>
 
         <!-- Execution history -->

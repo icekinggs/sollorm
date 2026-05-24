@@ -132,6 +132,9 @@ class Agent(Base):
     script_executions: Mapped[list["ScriptExecution"]] = relationship(
         back_populates="agent", cascade="all, delete-orphan"
     )
+    patch_scans: Mapped[list["PatchScan"]] = relationship(
+        back_populates="agent", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<Agent {self.hostname} ({self.id[:8]})>"
@@ -156,6 +159,59 @@ class Heartbeat(Base):
     reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
     agent: Mapped["Agent"] = relationship(back_populates="heartbeats")
+
+
+class PatchScan(Base):
+    __tablename__ = "patch_scans"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    agent_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("agents.id", ondelete="CASCADE"), index=True
+    )
+    requested_by_user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id"), index=True
+    )
+
+    status: Mapped[str] = mapped_column(String(20), default="scanning", index=True)
+    patch_count: Mapped[int | None] = mapped_column(Integer)
+    error_message: Mapped[str | None] = mapped_column(Text)
+
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    agent: Mapped["Agent"] = relationship(back_populates="patch_scans")
+    items: Mapped[list["PatchItem"]] = relationship(
+        back_populates="scan", cascade="all, delete-orphan"
+    )
+
+
+class PatchItem(Base):
+    __tablename__ = "patch_items"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    scan_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("patch_scans.id", ondelete="CASCADE"), index=True
+    )
+    agent_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("agents.id", ondelete="CASCADE"), index=True
+    )
+
+    name: Mapped[str] = mapped_column(String(500))
+    current_version: Mapped[str | None] = mapped_column(String(255))
+    available_version: Mapped[str | None] = mapped_column(String(255))
+    severity: Mapped[str | None] = mapped_column(String(50))
+    source: Mapped[str | None] = mapped_column(String(50))
+
+    installed: Mapped[bool] = mapped_column(Boolean, default=False)
+    installed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    scan: Mapped["PatchScan"] = relationship(back_populates="items")
 
 
 class ScriptExecution(Base):

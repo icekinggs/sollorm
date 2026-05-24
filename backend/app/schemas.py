@@ -181,4 +181,42 @@ class ScriptExecutionOut(BaseModel):
         from_attributes = True
 
 
+# ---------- Patch Management ----------
+
+class PatchScanOut(BaseModel):
+    id: str
+    agent_id: str
+    status: str
+    patch_count: int | None
+    error_message: str | None
+    requested_at: datetime
+    completed_at: datetime | None
+
+    class Config:
+        from_attributes = True
+
+
+class PatchItemOut(BaseModel):
+    id: str
+    name: str
+    current_version: str | None
+    available_version: str | None
+    severity: str | None
+    source: str | None
+    installed: bool
+    installed_at: datetime | None
+
+    class Config:
+        from_attributes = True
+
+
+class PatchScanDetailOut(BaseModel):
+    scan: PatchScanOut
+    items: list[PatchItemOut]
+
+
+class PatchInstallRequest(BaseModel):
+    package_names: list[str] = Field(min_length=1)
+
+
 TokenResponse.model_rebuild()

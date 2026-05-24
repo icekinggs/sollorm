@@ -23,5 +23,21 @@ export const agentsApi = {
 
   createExecution(id, payload) {
     return api.post(`/agents/${id}/executions`, payload)
+  },
+
+  patchScan(id) {
+    return api.post(`/agents/${id}/patches/scan`)
+  },
+
+  patchGet(id) {
+    return api.get(`/agents/${id}/patches`)
+  },
+
+  patchInstall(id, packageNames) {
+    return api.post(`/agents/${id}/patches/install`, { package_names: packageNames })
+  },
+
+  patchInstallAll(id) {
+    return api.post(`/agents/${id}/patches/install-all`)
   }
 }

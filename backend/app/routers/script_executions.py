@@ -1,12 +1,12 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import AsyncSessionLocal, get_db
-from app.models import Agent, ScriptExecution, User
+from app.models import Agent, PatchItem, PatchScan, ScriptExecution, User
 from app.auth import get_current_user
 from app.schemas import ScriptExecutionCreate, ScriptExecutionOut
 from app.services.tokens import find_valid_token, mark_token_used
@@ -31,6 +31,17 @@ class AgentConnectionManager:
 
     def is_connected(self, agent_id: str) -> bool:
         return agent_id in self._connections
+
+    async def send_command(self, agent_id: str, command: dict) -> bool:
+        websocket = self._connections.get(agent_id)
+        if websocket is None:
+            return False
+        try:
+            await websocket.send_json(command)
+            return True
+        except RuntimeError:
+            self._connections.pop(agent_id, None)
+            return False
 
     async def send_execution(self, agent_id: str, execution: ScriptExecution) -> bool:
         websocket = self._connections.get(agent_id)
@@ -162,6 +173,10 @@ async def agent_websocket(
                     await _mark_execution_running(db, payload.get("execution_id", ""))
                 elif message_type == "script_result":
                     await _finish_execution(db, payload)
+                elif message_type == "patch_scan_result":
+                    await _handle_patch_scan_result(db, payload)
+                elif message_type == "patch_install_result":
+                    await _handle_patch_install_result(db, payload)
     except WebSocketDisconnect:
         manager.disconnect(agent_id, websocket)
 
@@ -221,3 +236,64 @@ async def list_script_executions(
         .limit(min(limit, 200))
     )
     return list(result.scalars().all())
+
+
+# ─── Patch WebSocket handlers ─────────────────────────────────────────────────
+
+async def _handle_patch_scan_result(db: AsyncSession, payload: dict) -> None:
+    scan_id = payload.get("scan_id")
+    if not scan_id:
+        return
+
+    result = await db.execute(select(PatchScan).where(PatchScan.id == scan_id))
+    scan = result.scalar_one_or_none()
+    if scan is None:
+        return
+
+    error = payload.get("error")
+    if error:
+        scan.status = "error"
+        scan.error_message = str(error)
+        scan.completed_at = datetime.now(timezone.utc)
+        await db.commit()
+        return
+
+    raw_patches = payload.get("patches") or []
+
+    # Remove itens anteriores do mesmo scan (re-scan)
+    await db.execute(delete(PatchItem).where(PatchItem.scan_id == scan_id))
+
+    for p in raw_patches:
+        db.add(PatchItem(
+            scan_id=scan_id,
+            agent_id=scan.agent_id,
+            name=str(p.get("name") or ""),
+            current_version=p.get("current_version") or None,
+            available_version=p.get("available_version") or None,
+            severity=p.get("severity") or "unknown",
+            source=p.get("source") or None,
+        ))
+
+    scan.status = "done"
+    scan.patch_count = len(raw_patches)
+    scan.completed_at = datetime.now(timezone.utc)
+    await db.commit()
+
+
+async def _handle_patch_install_result(db: AsyncSession, payload: dict) -> None:
+    installed = payload.get("installed") or []
+    scan_id = payload.get("scan_id")
+    if not installed or not scan_id:
+        return
+
+    now = datetime.now(timezone.utc)
+    result = await db.execute(
+        select(PatchItem)
+        .where(PatchItem.scan_id == scan_id)
+        .where(PatchItem.name.in_(installed))
+    )
+    for item in result.scalars().all():
+        item.installed = True
+        item.installed_at = now
+
+    await db.commit()

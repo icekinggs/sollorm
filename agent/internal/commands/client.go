@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"sollorm-agent/internal/patches"
 )
 
 const reconnectDelay = 10 * time.Second
@@ -33,7 +35,6 @@ func (c *Client) Run(ctx context.Context) {
 		if err := c.connectAndServe(ctx); err != nil {
 			log.Printf("Canal de comandos desconectado: %v", err)
 		}
-
 		select {
 		case <-ctx.Done():
 			return
@@ -56,40 +57,117 @@ func (c *Client) connectAndServe(ctx context.Context) error {
 
 	log.Println("Canal de comandos conectado")
 	var writeMu sync.Mutex
+
+	safeSend := func(v any) error {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		return conn.WriteJSON(v)
+	}
+
 	for {
 		_, data, err := conn.ReadMessage()
 		if err != nil {
 			return err
 		}
 
-		var command ScriptCommand
-		if err := json.Unmarshal(data, &command); err != nil {
-			log.Printf("Comando inválido recebido: %v", err)
-			continue
+		// Decodifica só o tipo para rotear
+		var base struct {
+			Type string `json:"type"`
 		}
-		if command.Type != "run_script" {
+		if err := json.Unmarshal(data, &base); err != nil {
+			log.Printf("Mensagem inválida recebida: %v", err)
 			continue
 		}
 
-		writeMu.Lock()
-		err = conn.WriteJSON(map[string]string{
-			"type":         "script_started",
-			"execution_id": command.ExecutionID,
-		})
-		writeMu.Unlock()
-		if err != nil {
-			return err
-		}
+		switch base.Type {
 
-		go func(cmd ScriptCommand) {
-			result := Execute(ctx, cmd)
-			writeMu.Lock()
-			err := conn.WriteJSON(result)
-			writeMu.Unlock()
-			if err != nil {
-				log.Printf("Erro ao enviar resultado de script: %v", err)
+		case "run_script":
+			var command ScriptCommand
+			if err := json.Unmarshal(data, &command); err != nil {
+				log.Printf("Comando run_script inválido: %v", err)
+				continue
 			}
-		}(command)
+			if err := safeSend(map[string]string{
+				"type":         "script_started",
+				"execution_id": command.ExecutionID,
+			}); err != nil {
+				return err
+			}
+			go func(cmd ScriptCommand) {
+				result := Execute(ctx, cmd)
+				if err := safeSend(result); err != nil {
+					log.Printf("Erro ao enviar resultado de script: %v", err)
+				}
+			}(command)
+
+		case "scan_patches":
+			var cmd struct {
+				ScanID string `json:"scan_id"`
+			}
+			json.Unmarshal(data, &cmd)
+			go c.handlePatchScan(ctx, cmd.ScanID, safeSend)
+
+		case "install_patches":
+			var cmd struct {
+				ScanID  string   `json:"scan_id"`
+				Packages []string `json:"packages"`
+			}
+			json.Unmarshal(data, &cmd)
+			go c.handlePatchInstall(ctx, cmd.ScanID, cmd.Packages, safeSend)
+
+		default:
+			log.Printf("Tipo de comando desconhecido: %q", base.Type)
+		}
+	}
+}
+
+// handlePatchScan executa o scan e reporta o resultado ao backend.
+func (c *Client) handlePatchScan(ctx context.Context, scanID string, send func(any) error) {
+	log.Printf("Iniciando scan de patches (scan_id=%s)", scanID)
+
+	result := map[string]any{
+		"type":     "patch_scan_result",
+		"scan_id":  scanID,
+		"agent_id": c.agentID,
+	}
+
+	list, err := patches.Scan()
+	if err != nil {
+		log.Printf("Erro no scan de patches: %v", err)
+		result["error"] = err.Error()
+		result["patches"] = []any{}
+	} else {
+		log.Printf("Scan de patches concluído: %d pacotes disponíveis", len(list))
+		result["patches"] = list
+	}
+
+	if err := send(result); err != nil {
+		log.Printf("Erro ao enviar resultado de patch scan: %v", err)
+	}
+}
+
+// handlePatchInstall instala os pacotes e reporta ao backend.
+func (c *Client) handlePatchInstall(ctx context.Context, scanID string, pkgs []string, send func(any) error) {
+	log.Printf("Instalando %d pacote(s)...", len(pkgs))
+
+	output, err := patches.Install(pkgs)
+
+	result := map[string]any{
+		"type":     "patch_install_result",
+		"scan_id":  scanID,
+		"agent_id": c.agentID,
+		"output":   output,
+	}
+	if err != nil {
+		result["error"] = err.Error()
+		result["success"] = false
+	} else {
+		result["success"] = true
+		result["installed"] = pkgs
+	}
+
+	if err := send(result); err != nil {
+		log.Printf("Erro ao enviar resultado de patch install: %v", err)
 	}
 }
 
