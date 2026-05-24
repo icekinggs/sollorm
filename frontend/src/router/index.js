@@ -32,6 +32,16 @@ const routes = [
         path: 'tokens',
         name: 'tokens',
         component: () => import('@/views/TokensView.vue')
+      },
+      {
+        path: 'groups',
+        name: 'groups',
+        component: () => import('@/views/GroupsView.vue')
+      },
+      {
+        path: 'alerts',
+        name: 'alerts',
+        component: () => import('@/views/AlertsView.vue')
       }
     ]
   },

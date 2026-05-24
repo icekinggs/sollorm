@@ -164,6 +164,8 @@ async def agent_websocket(
 
     await manager.connect(agent_id, websocket)
     await _send_queued_executions(agent_id)
+    from app.routers.notifications import broadcast  # lazy — avoids circular import
+    await broadcast({"type": "agent_online", "agent_id": agent_id})
     try:
         while True:
             payload = await websocket.receive_json()
@@ -185,6 +187,8 @@ async def agent_websocket(
                     await _handle_patch_install_result(db, payload)
     except WebSocketDisconnect:
         manager.disconnect(agent_id, websocket)
+        from app.routers.notifications import broadcast  # lazy
+        await broadcast({"type": "agent_offline", "agent_id": agent_id})
 
 
 @router.post(

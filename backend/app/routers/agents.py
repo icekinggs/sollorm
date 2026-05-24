@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 from app.auth import AgentAuthResult, get_current_user, verify_agent_token
 from app.config import settings
 from app.database import get_db
-from app.models import Agent, AgentToken, Heartbeat, User
+from app.models import Agent, AgentToken, Group, Heartbeat, User
 from app.schemas import (
     AgentOut,
     HeartbeatIn,
@@ -52,7 +52,9 @@ def _build_agent_out(agent: Agent, now: datetime) -> AgentOut:
         is_online=is_online,
         token_name=token_name,
         token_prefix=token_prefix,
-        remote_access_url=settings.meshcentral_public_url.rstrip("/") or None,
+        last_ip=agent.last_ip,
+        group_id=agent.group_id,
+        group_name=agent.group.name if agent.group else None,
     )
 
 
@@ -68,11 +70,13 @@ async def _link_token_to_agent(
 
 @router.post("/system-info", response_model=StatusResponse)
 async def receive_system_info(
+    request: Request,
     payload: SystemInfoIn,
     db: AsyncSession = Depends(get_db),
     auth: AgentAuthResult = Depends(verify_agent_token),
 ):
     now = datetime.now(timezone.utc)
+    client_ip = request.client.host if request.client else None
 
     result = await db.execute(select(Agent).where(Agent.id == payload.agent_id))
     agent = result.scalar_one_or_none()
@@ -109,6 +113,9 @@ async def receive_system_info(
         agent.last_system_info = now
         agent.last_seen = now
 
+    if client_ip:
+        agent.last_ip = client_ip
+
     await _link_token_to_agent(db, auth, agent)
     await db.commit()
     return StatusResponse(message=f"Agente {agent.hostname} atualizado")
@@ -116,11 +123,13 @@ async def receive_system_info(
 
 @router.post("/heartbeat", response_model=StatusResponse)
 async def receive_heartbeat(
+    request: Request,
     payload: HeartbeatIn,
     db: AsyncSession = Depends(get_db),
     auth: AgentAuthResult = Depends(verify_agent_token),
 ):
     now = datetime.now(timezone.utc)
+    client_ip = request.client.host if request.client else None
 
     result = await db.execute(select(Agent).where(Agent.id == payload.agent_id))
     agent = result.scalar_one_or_none()
@@ -133,6 +142,8 @@ async def receive_heartbeat(
     agent.last_seen = now
     if not agent.hostname:
         agent.hostname = payload.hostname
+    if client_ip:
+        agent.last_ip = client_ip
 
     heartbeat = Heartbeat(
         agent_id=payload.agent_id,
@@ -146,17 +157,46 @@ async def receive_heartbeat(
 
     await _link_token_to_agent(db, auth, agent)
     await db.commit()
+
+    from app.routers.notifications import broadcast  # lazy — avoids circular import
+    await broadcast({
+        "type": "agent_heartbeat",
+        "agent_id": payload.agent_id,
+        "hostname": agent.hostname,
+        "cpu_usage_percent": payload.cpu_usage_percent,
+        "ram_usage_percent": payload.ram_usage_percent,
+        "disk_usage_percent": payload.disk_usage_percent,
+        "uptime_seconds": payload.uptime_seconds,
+        "last_seen": now.isoformat(),
+    })
+
+    from app.routers.alerts import evaluate_alert_rules  # lazy
+    await evaluate_alert_rules(payload.agent_id, {
+        "cpu_usage_percent": payload.cpu_usage_percent,
+        "ram_usage_percent": payload.ram_usage_percent,
+        "disk_usage_percent": payload.disk_usage_percent,
+    })
+
     return StatusResponse(message="heartbeat recebido")
 
 
 @router.get("", response_model=list[AgentOut])
 async def list_agents(
+    group_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(
-        select(Agent).options(selectinload(Agent.token)).order_by(Agent.hostname)
+    query = (
+        select(Agent)
+        .options(selectinload(Agent.token), selectinload(Agent.group))
+        .order_by(Agent.hostname)
     )
+    if group_id == "none":
+        query = query.where(Agent.group_id.is_(None))
+    elif group_id is not None:
+        query = query.where(Agent.group_id == group_id)
+
+    result = await db.execute(query)
     agents = result.scalars().all()
     now = datetime.now(timezone.utc)
     return [_build_agent_out(agent, now) for agent in agents]
@@ -169,7 +209,9 @@ async def get_agent(
     current_user: User = Depends(get_current_user),
 ):
     result = await db.execute(
-        select(Agent).options(selectinload(Agent.token)).where(Agent.id == agent_id)
+        select(Agent)
+        .options(selectinload(Agent.token), selectinload(Agent.group))
+        .where(Agent.id == agent_id)
     )
     agent = result.scalar_one_or_none()
 
@@ -204,7 +246,9 @@ async def delete_agent(
 ):
 
     result = await db.execute(
-        select(Agent).options(selectinload(Agent.token)).where(Agent.id == agent_id)
+        select(Agent)
+        .options(selectinload(Agent.token), selectinload(Agent.group))
+        .where(Agent.id == agent_id)
     )
     agent = result.scalar_one_or_none()
 

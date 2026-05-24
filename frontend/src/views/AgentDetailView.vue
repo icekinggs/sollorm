@@ -1,9 +1,11 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import { agentsApi } from '@/api/agents'
+import { groupsApi } from '@/api/groups'
+import { alertsApi } from '@/api/alerts'
 import {
   formatBytes,
   formatRelativeDate,
@@ -23,7 +25,9 @@ import TabList from 'primevue/tablist'
 import Tab from 'primevue/tab'
 import TabPanels from 'primevue/tabpanels'
 import TabPanel from 'primevue/tabpanel'
+import Select from 'primevue/select'
 
+import { useNotifications } from '@/composables/useNotifications'
 import SshTerminal from '@/components/SshTerminal.vue'
 import RemoteScreenPanel from '@/components/RemoteScreenPanel.vue'
 import PatchManager from '@/components/PatchManager.vue'
@@ -39,10 +43,19 @@ const confirm = useConfirm()
 const agent = ref(null)
 const heartbeats = ref([])
 const executions = ref([])
+const groups = ref([])
+const agentAlerts = ref([])
 const loading = ref(true)
 const deleting = ref(false)
-const refreshInterval = ref(null)
+const assigningGroup = ref(false)
 const activeTab = ref('access')
+
+const agentFiringAlerts = computed(() => agentAlerts.value.filter(e => e.state === 'firing'))
+const agentAlertHistory  = computed(() => agentAlerts.value.filter(e => e.state === 'resolved').slice(0, 30))
+
+function metricLabel(m) {
+  return { cpu_usage_percent: 'CPU', ram_usage_percent: 'RAM', disk_usage_percent: 'Disco' }[m] || m
+}
 
 const lastHeartbeat = computed(() => heartbeats.value[0] || null)
 const isWindows = computed(() => agent.value?.os === 'windows')
@@ -63,16 +76,25 @@ const osLabel = computed(() => {
   return 'Linux'
 })
 
+const groupOptions = computed(() => [
+  { label: 'Sem grupo', value: null },
+  ...groups.value.map(g => ({ label: g.name, value: g.id, color: g.color }))
+])
+
 async function loadData() {
   try {
-    const [agentRes, hbRes, execRes] = await Promise.all([
+    const [agentRes, hbRes, execRes, grpRes, alertRes] = await Promise.all([
       agentsApi.get(props.id),
       agentsApi.heartbeats(props.id, 20),
-      agentsApi.executions(props.id, 20)
+      agentsApi.executions(props.id, 20),
+      groupsApi.list(),
+      alertsApi.listAgentEvents(props.id, { limit: 50 }),
     ])
     agent.value = agentRes.data
     heartbeats.value = hbRes.data
     executions.value = execRes.data
+    groups.value = grpRes.data
+    agentAlerts.value = alertRes.data
   } catch (err) {
     if (err.response?.status === 404) {
       toast.add({ severity: 'error', summary: 'Não encontrado', detail: 'Agente não existe', life: 3000 })
@@ -92,6 +114,21 @@ function executionSeverity(status) {
   return 'danger'
 }
 
+async function assignGroup(groupId) {
+  if (!agent.value) return
+  assigningGroup.value = true
+  try {
+    const res = await groupsApi.assignAgent(props.id, groupId)
+    agent.value.group_id = res.data.group_id
+    agent.value.group_name = res.data.group_name
+    toast.add({ severity: 'success', summary: 'Grupo atualizado', detail: res.data.group_name || 'Sem grupo', life: 2000 })
+  } catch (err) {
+    toast.add({ severity: 'error', summary: 'Erro', detail: err.response?.data?.detail || 'Falha ao atualizar grupo', life: 4000 })
+  } finally {
+    assigningGroup.value = false
+  }
+}
+
 function handleDelete() {
   if (!agent.value) return
   confirm.require({
@@ -106,7 +143,6 @@ function handleDelete() {
       try {
         await agentsApi.delete(props.id)
         toast.add({ severity: 'success', summary: 'Agente apagado', detail: `"${agent.value.hostname}" removido`, life: 3000 })
-        if (refreshInterval.value) clearInterval(refreshInterval.value)
         router.push('/dashboard')
       } catch (err) {
         deleting.value = false
@@ -116,14 +152,44 @@ function handleDelete() {
   })
 }
 
-onMounted(() => {
-  loadData()
-  refreshInterval.value = setInterval(loadData, 30000)
+useNotifications((msg) => {
+  if (msg.agent_id !== props.id) return
+
+  if (msg.type === 'agent_online' && agent.value) {
+    agent.value.is_online = true
+    agent.value.last_seen = new Date().toISOString()
+  } else if (msg.type === 'agent_offline' && agent.value) {
+    agent.value.is_online = false
+  } else if (msg.type === 'agent_heartbeat' && agent.value) {
+    agent.value.is_online            = true
+    agent.value.last_seen            = msg.last_seen
+    agent.value.hostname             = msg.hostname ?? agent.value.hostname
+    // Prepend new heartbeat to history (keep last 20)
+    heartbeats.value = [
+      {
+        cpu_usage_percent:  msg.cpu_usage_percent,
+        ram_usage_percent:  msg.ram_usage_percent,
+        disk_usage_percent: msg.disk_usage_percent,
+        uptime_seconds:     msg.uptime_seconds,
+        reported_at:        msg.last_seen,
+      },
+      ...heartbeats.value,
+    ].slice(0, 20)
+  } else if (msg.type === 'alert_fired') {
+    agentAlerts.value.unshift({
+      id: msg.event_id, rule_id: msg.rule_id, rule_name: msg.rule_name,
+      agent_id: msg.agent_id, metric: msg.metric, value: msg.value,
+      threshold: msg.threshold, operator: msg.operator, severity: msg.severity,
+      state: 'firing', fired_at: msg.fired_at, resolved_at: null,
+    })
+    toast.add({ severity: msg.severity === 'critical' ? 'error' : 'warn', summary: msg.rule_name, detail: `${metricLabel(msg.metric)} ${msg.operator} ${msg.threshold}%`, life: 5000 })
+  } else if (msg.type === 'alert_resolved') {
+    const ev = agentAlerts.value.find(e => e.id === msg.event_id)
+    if (ev) { ev.state = 'resolved'; ev.resolved_at = msg.resolved_at }
+  }
 })
 
-onUnmounted(() => {
-  if (refreshInterval.value) clearInterval(refreshInterval.value)
-})
+onMounted(() => { loadData() })
 </script>
 
 <template>
@@ -150,6 +216,16 @@ onUnmounted(() => {
           class="status-tag"
         />
         <div class="spacer" />
+        <Select
+          :model-value="agent.group_id"
+          :options="groupOptions"
+          option-label="label"
+          option-value="value"
+          placeholder="Sem grupo"
+          :loading="assigningGroup"
+          class="group-select"
+          @change="assignGroup($event.value)"
+        />
         <span class="version-badge" v-if="agent.agent_version">v{{ agent.agent_version }}</span>
         <Button icon="pi pi-trash" text rounded severity="danger" :loading="deleting" @click="handleDelete" />
       </div>
@@ -244,6 +320,10 @@ onUnmounted(() => {
                 <i class="pi pi-history tab-icon" />Execuções
                 <span v-if="executions.length" class="tab-badge">{{ executions.length }}</span>
               </Tab>
+              <Tab value="alerts">
+                <i class="pi pi-bell tab-icon" />Alertas
+                <span v-if="agentFiringAlerts.length" class="tab-badge alert-tab-badge">{{ agentFiringAlerts.length }}</span>
+              </Tab>
             </TabList>
 
             <TabPanels>
@@ -269,6 +349,39 @@ onUnmounted(() => {
               <!-- Patches -->
               <TabPanel value="patches">
                 <PatchManager :agent-id="agent.id" />
+              </TabPanel>
+
+              <!-- Alertas -->
+              <TabPanel value="alerts">
+                <div class="alerts-tab">
+                  <div v-if="agentFiringAlerts.length === 0 && agentAlertHistory.length === 0" class="empty-state">
+                    Nenhum alerta para este agente.
+                  </div>
+                  <template v-else>
+                    <div v-if="agentFiringAlerts.length" class="alert-section">
+                      <div class="alert-section-title">Ativos</div>
+                      <div v-for="ev in agentFiringAlerts" :key="ev.id" class="alert-item" :class="ev.severity">
+                        <i :class="['pi', ev.severity === 'critical' ? 'pi-times-circle' : 'pi-exclamation-triangle']" />
+                        <div class="alert-item-body">
+                          <span class="alert-item-rule">{{ ev.rule_name }}</span>
+                          <span class="alert-item-desc">{{ metricLabel(ev.metric) }} {{ ev.operator }} {{ ev.threshold }}% — valor: <strong>{{ ev.value?.toFixed(1) }}%</strong></span>
+                        </div>
+                        <span class="alert-item-time muted">{{ formatRelativeDate(ev.fired_at) }}</span>
+                      </div>
+                    </div>
+                    <div v-if="agentAlertHistory.length" class="alert-section">
+                      <div class="alert-section-title">Histórico</div>
+                      <div v-for="ev in agentAlertHistory" :key="ev.id" class="alert-item resolved">
+                        <i class="pi pi-check-circle" />
+                        <div class="alert-item-body">
+                          <span class="alert-item-rule">{{ ev.rule_name }}</span>
+                          <span class="alert-item-desc">{{ metricLabel(ev.metric) }} {{ ev.operator }} {{ ev.threshold }}%</span>
+                        </div>
+                        <span class="alert-item-time muted">{{ formatRelativeDate(ev.fired_at) }}</span>
+                      </div>
+                    </div>
+                  </template>
+                </div>
               </TabPanel>
 
               <!-- Execuções -->
@@ -355,6 +468,11 @@ onUnmounted(() => {
 .status-tag { flex-shrink: 0; }
 
 .spacer { flex: 1; }
+
+.group-select {
+  font-size: 0.82rem;
+  width: 160px;
+}
 
 .version-badge {
   font-size: 0.75rem;
@@ -531,6 +649,46 @@ onUnmounted(() => {
   padding: 0.1rem 0.4rem;
   border-radius: 999px;
 }
+
+.alert-tab-badge {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--p-red-500);
+}
+
+/* Alerts tab */
+.alerts-tab { padding: 0.5rem 0; }
+
+.alert-section { margin-bottom: 0.5rem; }
+
+.alert-section-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--p-text-muted-color);
+  padding: 0.5rem 1.25rem 0.25rem;
+}
+
+.alert-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 1.25rem;
+  border-bottom: 1px solid var(--p-content-border-color);
+}
+
+.alert-item:last-child { border-bottom: none; }
+
+.alert-item .pi { font-size: 1rem; flex-shrink: 0; }
+.alert-item.critical .pi { color: var(--p-red-500); }
+.alert-item.warning .pi  { color: var(--p-yellow-500, #f59e0b); }
+.alert-item.resolved     { opacity: 0.55; }
+.alert-item.resolved .pi { color: var(--p-green-500); }
+
+.alert-item-body { flex: 1; display: flex; flex-direction: column; gap: 0.1rem; }
+.alert-item-rule { font-weight: 600; font-size: 0.875rem; }
+.alert-item-desc { font-size: 0.78rem; color: var(--p-text-muted-color); }
+.alert-item-time { font-size: 0.75rem; white-space: nowrap; }
 
 /* Notice */
 .notice {

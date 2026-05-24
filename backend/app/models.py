@@ -93,11 +93,33 @@ class AgentToken(Base):
         return datetime.now(timezone.utc) > self.expires_at
 
 
+class Group(Base):
+    __tablename__ = "groups"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    name: Mapped[str] = mapped_column(String(255), index=True)
+    color: Mapped[str | None] = mapped_column(String(20))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    created_by_user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id")
+    )
+
+    agents: Mapped[list["Agent"]] = relationship(back_populates="group")
+
+
 class Agent(Base):
     __tablename__ = "agents"
 
     id: Mapped[str] = mapped_column(
         UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+
+    group_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("groups.id", ondelete="SET NULL"), index=True
     )
 
     hostname: Mapped[str] = mapped_column(String(255), index=True)
@@ -112,12 +134,15 @@ class Agent(Base):
     disk_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
 
     agent_version: Mapped[str | None] = mapped_column(String(20))
+    last_ip: Mapped[str | None] = mapped_column(String(45))
 
     first_seen: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
     last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_system_info: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    group: Mapped["Group | None"] = relationship(back_populates="agents")
 
     # Relação reversa com o token (1-to-1)
     token: Mapped["AgentToken | None"] = relationship(
@@ -212,6 +237,61 @@ class PatchItem(Base):
     installed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     scan: Mapped["PatchScan"] = relationship(back_populates="items")
+
+
+class AlertRule(Base):
+    __tablename__ = "alert_rules"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    name: Mapped[str] = mapped_column(String(255))
+    # null = applies to all agents
+    agent_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("agents.id", ondelete="CASCADE"), index=True
+    )
+    metric: Mapped[str] = mapped_column(String(50))   # cpu_usage_percent | ram_usage_percent | disk_usage_percent
+    operator: Mapped[str] = mapped_column(String(5))  # > | >= | < | <=
+    threshold: Mapped[float] = mapped_column(Float)
+    severity: Mapped[str] = mapped_column(String(20), default="warning")  # warning | critical
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    created_by_user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id")
+    )
+
+    events: Mapped[list["AlertEvent"]] = relationship(
+        back_populates="rule", cascade="all, delete-orphan"
+    )
+
+
+class AlertEvent(Base):
+    __tablename__ = "alert_events"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    rule_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("alert_rules.id", ondelete="CASCADE"), index=True
+    )
+    agent_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("agents.id", ondelete="CASCADE"), index=True
+    )
+    metric: Mapped[str] = mapped_column(String(50))
+    value: Mapped[float | None] = mapped_column(Float)
+    threshold: Mapped[float] = mapped_column(Float)
+    operator: Mapped[str] = mapped_column(String(5))
+    severity: Mapped[str] = mapped_column(String(20))
+    state: Mapped[str] = mapped_column(String(20), default="firing", index=True)  # firing | resolved
+    fired_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    rule: Mapped["AlertRule"] = relationship(back_populates="events")
+    agent: Mapped["Agent"] = relationship()
 
 
 class ScriptExecution(Base):

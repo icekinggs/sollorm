@@ -48,6 +48,14 @@ function toggleUserMenu(event) {
           <i class="pi pi-th-large"></i>
           Dashboard
         </router-link>
+        <router-link to="/alerts" active-class="active">
+          <i class="pi pi-bell"></i>
+          Alertas
+        </router-link>
+        <router-link to="/groups" active-class="active">
+          <i class="pi pi-folder"></i>
+          Grupos
+        </router-link>
         <router-link to="/tokens" active-class="active">
           <i class="pi pi-key"></i>
           Tokens

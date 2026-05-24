@@ -45,7 +45,10 @@ class AgentOut(BaseModel):
     is_online: bool = False
     token_name: str | None = None
     token_prefix: str | None = None
+    last_ip: str | None = None
     remote_access_url: str | None = None
+    group_id: str | None = None
+    group_name: str | None = None
 
     class Config:
         from_attributes = True
@@ -217,6 +220,92 @@ class PatchScanDetailOut(BaseModel):
 
 class PatchInstallRequest(BaseModel):
     package_names: list[str] = Field(min_length=1)
+
+
+# ---------- Groups ----------
+
+class GroupCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    color: str | None = None
+
+
+class GroupUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=255)
+    color: str | None = None
+
+
+class GroupOut(BaseModel):
+    id: str
+    name: str
+    color: str | None
+    created_at: datetime
+    agent_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+
+class AgentGroupAssign(BaseModel):
+    group_id: str | None = None
+
+
+# ---------- Alerts ----------
+
+MetricLiteral = Literal["cpu_usage_percent", "ram_usage_percent", "disk_usage_percent"]
+OperatorLiteral = Literal[">", ">=", "<", "<="]
+SeverityLiteral = Literal["warning", "critical"]
+
+
+class AlertRuleCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    agent_id: str | None = None
+    metric: MetricLiteral
+    operator: OperatorLiteral
+    threshold: float = Field(ge=0, le=100)
+    severity: SeverityLiteral = "warning"
+
+
+class AlertRuleUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=255)
+    metric: MetricLiteral | None = None
+    operator: OperatorLiteral | None = None
+    threshold: float | None = Field(None, ge=0, le=100)
+    severity: SeverityLiteral | None = None
+    enabled: bool | None = None
+
+
+class AlertRuleOut(BaseModel):
+    id: str
+    name: str
+    agent_id: str | None
+    metric: str
+    operator: str
+    threshold: float
+    severity: str
+    enabled: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AlertEventOut(BaseModel):
+    id: str
+    rule_id: str
+    rule_name: str | None = None
+    agent_id: str
+    agent_hostname: str | None = None
+    metric: str
+    value: float | None
+    threshold: float
+    operator: str
+    severity: str
+    state: str
+    fired_at: datetime
+    resolved_at: datetime | None
+
+    class Config:
+        from_attributes = True
 
 
 TokenResponse.model_rebuild()
