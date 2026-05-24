@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"sollorm-agent/internal/software"
 	"sollorm-agent/internal/system"
 )
 
@@ -102,6 +103,19 @@ func (r *Reporter) SendHeartbeat(ctx context.Context, m *system.SystemMetrics) e
 		Timestamp: time.Now().UTC(),
 	}
 	return r.post(ctx, "/api/v1/agents/heartbeat", payload)
+}
+
+type softwareSyncPayload struct {
+	AgentID string          `json:"agent_id"`
+	Items   []software.Item `json:"items"`
+}
+
+func (r *Reporter) SendSoftwareInventory(ctx context.Context, items []software.Item) error {
+	payload := softwareSyncPayload{
+		AgentID: r.agentID,
+		Items:   items,
+	}
+	return r.post(ctx, fmt.Sprintf("/api/v1/agents/%s/software/sync", r.agentID), payload)
 }
 
 func (r *Reporter) post(ctx context.Context, path string, payload interface{}) error {

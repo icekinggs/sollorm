@@ -308,4 +308,32 @@ class AlertEventOut(BaseModel):
         from_attributes = True
 
 
+# ---------- Software Inventory ----------
+
+class SoftwareItemIn(BaseModel):
+    name: str
+    version: str | None = None
+    publisher: str | None = None
+    install_date: str | None = None
+    source: str
+
+
+class SoftwareSyncPayload(BaseModel):
+    agent_id: str
+    items: list[SoftwareItemIn]
+
+
+class SoftwareItemOut(BaseModel):
+    id: int
+    name: str
+    version: str | None
+    publisher: str | None
+    install_date: str | None
+    source: str
+    collected_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 TokenResponse.model_rebuild()

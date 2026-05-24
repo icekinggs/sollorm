@@ -6,6 +6,7 @@ import { useConfirm } from 'primevue/useconfirm'
 import { agentsApi } from '@/api/agents'
 import { groupsApi } from '@/api/groups'
 import { alertsApi } from '@/api/alerts'
+import { softwareApi } from '@/api/software'
 import {
   formatBytes,
   formatRelativeDate,
@@ -14,6 +15,7 @@ import {
   usageColorClass
 } from '@/composables/useFormatters'
 
+import InputText from 'primevue/inputtext'
 import Button from 'primevue/button'
 import Tag from 'primevue/tag'
 import ProgressSpinner from 'primevue/progressspinner'
@@ -45,6 +47,8 @@ const heartbeats = ref([])
 const executions = ref([])
 const groups = ref([])
 const agentAlerts = ref([])
+const softwareItems = ref([])
+const softwareFilter = ref('')
 const loading = ref(true)
 const deleting = ref(false)
 const assigningGroup = ref(false)
@@ -52,6 +56,17 @@ const activeTab = ref('access')
 
 const agentFiringAlerts = computed(() => agentAlerts.value.filter(e => e.state === 'firing'))
 const agentAlertHistory  = computed(() => agentAlerts.value.filter(e => e.state === 'resolved').slice(0, 30))
+
+const filteredSoftware = computed(() => {
+  const q = softwareFilter.value.trim().toLowerCase()
+  if (!q) return softwareItems.value
+  return softwareItems.value.filter(s => s.name.toLowerCase().includes(q) || (s.publisher || '').toLowerCase().includes(q))
+})
+
+const softwareLastSync = computed(() => {
+  if (!softwareItems.value.length) return null
+  return softwareItems.value[0].collected_at
+})
 
 function metricLabel(m) {
   return { cpu_usage_percent: 'CPU', ram_usage_percent: 'RAM', disk_usage_percent: 'Disco' }[m] || m
@@ -83,18 +98,20 @@ const groupOptions = computed(() => [
 
 async function loadData() {
   try {
-    const [agentRes, hbRes, execRes, grpRes, alertRes] = await Promise.all([
+    const [agentRes, hbRes, execRes, grpRes, alertRes, swRes] = await Promise.all([
       agentsApi.get(props.id),
       agentsApi.heartbeats(props.id, 20),
       agentsApi.executions(props.id, 20),
       groupsApi.list(),
       alertsApi.listAgentEvents(props.id, { limit: 50 }),
+      softwareApi.list(props.id),
     ])
     agent.value = agentRes.data
     heartbeats.value = hbRes.data
     executions.value = execRes.data
     groups.value = grpRes.data
     agentAlerts.value = alertRes.data
+    softwareItems.value = swRes.data
   } catch (err) {
     if (err.response?.status === 404) {
       toast.add({ severity: 'error', summary: 'Não encontrado', detail: 'Agente não existe', life: 3000 })
@@ -324,6 +341,10 @@ onMounted(() => { loadData() })
                 <i class="pi pi-bell tab-icon" />Alertas
                 <span v-if="agentFiringAlerts.length" class="tab-badge alert-tab-badge">{{ agentFiringAlerts.length }}</span>
               </Tab>
+              <Tab value="software">
+                <i class="pi pi-box tab-icon" />Software
+                <span v-if="softwareItems.length" class="tab-badge">{{ softwareItems.length }}</span>
+              </Tab>
             </TabList>
 
             <TabPanels>
@@ -381,6 +402,38 @@ onMounted(() => { loadData() })
                       </div>
                     </div>
                   </template>
+                </div>
+              </TabPanel>
+
+              <!-- Software -->
+              <TabPanel value="software">
+                <div class="software-tab">
+                  <div class="software-toolbar">
+                    <InputText v-model="softwareFilter" placeholder="Filtrar por nome ou publisher..." class="sw-filter" />
+                    <span v-if="softwareLastSync" class="muted sw-sync-time">
+                      Atualizado {{ formatRelativeDate(softwareLastSync) }}
+                    </span>
+                  </div>
+                  <DataTable :value="filteredSoftware" :rows="50" paginator striped-rows>
+                    <template #empty>
+                      <div class="empty-state">
+                        {{ softwareItems.length ? 'Nenhum resultado para o filtro.' : 'Nenhum inventário disponível. O agente envia ao iniciar.' }}
+                      </div>
+                    </template>
+                    <Column field="name" header="Nome" sortable />
+                    <Column field="version" header="Versão" style="width: 160px" />
+                    <Column field="publisher" header="Publisher" style="width: 220px">
+                      <template #body="{ data }">{{ data.publisher || '—' }}</template>
+                    </Column>
+                    <Column field="install_date" header="Data instalação" style="width: 140px">
+                      <template #body="{ data }">{{ data.install_date || '—' }}</template>
+                    </Column>
+                    <Column field="source" header="Fonte" style="width: 110px">
+                      <template #body="{ data }">
+                        <code class="mono">{{ data.source }}</code>
+                      </template>
+                    </Column>
+                  </DataTable>
                 </div>
               </TabPanel>
 
@@ -726,6 +779,19 @@ onMounted(() => { loadData() })
   color: var(--p-text-muted-color);
   font-size: 0.875rem;
 }
+
+/* Software tab */
+.software-tab { padding: 0.5rem 0; }
+
+.software-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.sw-filter { width: 280px; font-size: 0.85rem; }
+.sw-sync-time { font-size: 0.78rem; }
 
 /* Shared */
 .mono { font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 0.8rem; }

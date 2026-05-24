@@ -294,6 +294,23 @@ class AlertEvent(Base):
     agent: Mapped["Agent"] = relationship()
 
 
+class SoftwareItem(Base):
+    __tablename__ = "software_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    agent_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("agents.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(500))
+    version: Mapped[str | None] = mapped_column(String(255))
+    publisher: Mapped[str | None] = mapped_column(String(500))
+    install_date: Mapped[str | None] = mapped_column(String(20))
+    source: Mapped[str] = mapped_column(String(50))
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
 class ScriptExecution(Base):
     __tablename__ = "script_executions"
 

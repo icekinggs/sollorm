@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import Base, engine
-from app.routers import agent_tokens, agents, alerts, auth, groups, install, notifications, patches, rdp, remote_access, remote_screen, script_executions
+from app.routers import agent_tokens, agents, alerts, auth, groups, install, notifications, patches, rdp, remote_access, remote_screen, script_executions, software
 
 
 @asynccontextmanager
@@ -39,6 +39,7 @@ app.include_router(script_executions.router, prefix=settings.api_v1_prefix)
 app.include_router(patches.router, prefix=settings.api_v1_prefix)
 app.include_router(groups.router, prefix=settings.api_v1_prefix)
 app.include_router(alerts.router, prefix=settings.api_v1_prefix)
+app.include_router(software.router, prefix=settings.api_v1_prefix)
 app.add_api_websocket_route(
     f"{settings.api_v1_prefix}/agents/{{agent_id}}/ssh",
     remote_access.ssh_websocket,

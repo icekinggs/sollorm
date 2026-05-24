@@ -11,12 +11,14 @@ import (
 
 	"sollorm-agent/internal/commands"
 	"sollorm-agent/internal/reporter"
+	"sollorm-agent/internal/software"
 	"sollorm-agent/internal/system"
 )
 
 const (
-	HeartbeatInterval  = 60 * time.Second
-	SystemInfoInterval = 30 * time.Minute
+	HeartbeatInterval       = 60 * time.Second
+	SystemInfoInterval      = 30 * time.Minute
+	SoftwareInventoryInterval = 6 * time.Hour
 )
 
 // Program implementa ksvc.Interface
@@ -82,6 +84,10 @@ func (p *Program) run(ctx context.Context) {
 	log.Println(">>> Enviando primeiro heartbeat...")
 	p.sendHeartbeat(ctx)
 
+	// Coleta inicial de inventário de software
+	log.Println(">>> Coletando inventário de software...")
+	p.sendSoftwareInventory(ctx)
+
 	commandClient := commands.NewClient(
 		p.Reporter.ServerURL(),
 		p.Reporter.Token(),
@@ -91,8 +97,10 @@ func (p *Program) run(ctx context.Context) {
 
 	heartbeatTicker := time.NewTicker(HeartbeatInterval)
 	systemInfoTicker := time.NewTicker(SystemInfoInterval)
+	softwareTicker := time.NewTicker(SoftwareInventoryInterval)
 	defer heartbeatTicker.Stop()
 	defer systemInfoTicker.Stop()
+	defer softwareTicker.Stop()
 
 	for {
 		select {
@@ -110,7 +118,23 @@ func (p *Program) run(ctx context.Context) {
 					log.Printf(">>> ERRO ao enviar system info: %v", err)
 				}
 			}
+
+		case <-softwareTicker.C:
+			log.Println(">>> Tick de inventário de software...")
+			p.sendSoftwareInventory(ctx)
 		}
+	}
+}
+
+func (p *Program) sendSoftwareInventory(ctx context.Context) {
+	items := software.Collect()
+	if items == nil {
+		log.Println("Inventário de software: plataforma não suportada ou sem gerenciador de pacotes")
+		return
+	}
+	log.Printf("Inventário de software: %d itens coletados", len(items))
+	if err := p.Reporter.SendSoftwareInventory(ctx, items); err != nil {
+		log.Printf("Erro ao enviar inventário de software: %v", err)
 	}
 }
 
