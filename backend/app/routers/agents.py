@@ -9,6 +9,7 @@ from app.auth import AgentAuthResult, get_current_user, verify_agent_token
 from app.config import settings
 from app.database import get_db
 from app.models import Agent, AgentToken, Group, Heartbeat, User
+from app.version import get_latest_version
 
 
 def _get_command_manager():
@@ -62,8 +63,7 @@ def _build_agent_out(agent: Agent, now: datetime) -> AgentOut:
         group_name=agent.group.name if agent.group else None,
         update_available=bool(
             agent.agent_version
-            and settings.agent_current_version
-            and agent.agent_version != settings.agent_current_version
+            and agent.agent_version != get_latest_version()
         ),
     )
 
@@ -293,9 +293,10 @@ async def trigger_agent_update(
 
     os_key = agent.os or "linux"
     filename = "sollorm-agent-windows-amd64.exe" if os_key == "windows" else "sollorm-agent-linux-amd64"
+    latest = get_latest_version()
     download_url = (
         f"https://github.com/{settings.github_repo}/releases/download"
-        f"/{settings.agent_current_version}/{filename}"
+        f"/{latest}/{filename}"
     )
 
     sent = await _get_command_manager().send_command(agent_id, {
@@ -306,4 +307,4 @@ async def trigger_agent_update(
     if not sent:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Agente não está conectado")
 
-    return StatusResponse(message=f"Atualização para {settings.agent_current_version} iniciada")
+    return StatusResponse(message=f"Atualização para {latest} iniciada")

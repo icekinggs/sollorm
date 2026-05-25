@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -6,13 +7,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import Base, engine
 from app.routers import agent_tokens, agents, alerts, auth, groups, install, notifications, patches, rdp, remote_access, remote_screen, script_executions, software
+from app.version import start_version_poller
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    poller = asyncio.create_task(start_version_poller())
     yield
+    poller.cancel()
     await engine.dispose()
 
 
