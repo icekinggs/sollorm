@@ -56,6 +56,10 @@ function toggleUserMenu(event) {
           <i class="pi pi-folder"></i>
           Grupos
         </router-link>
+        <router-link to="/updates" active-class="active">
+          <i class="pi pi-sync"></i>
+          Atualizações
+        </router-link>
         <router-link to="/tokens" active-class="active">
           <i class="pi pi-key"></i>
           Tokens

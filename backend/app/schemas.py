@@ -309,6 +309,44 @@ class AlertEventOut(BaseModel):
         from_attributes = True
 
 
+# ---------- Update Approvals ----------
+
+class UpdateApprovalCreate(BaseModel):
+    version: str = Field(min_length=1, max_length=50)
+    group_id: str | None = None   # None + is_global=False → Sem Grupo
+    is_global: bool = False
+    notes: str | None = None
+
+
+class UpdateApprovalOut(BaseModel):
+    id: str
+    version: str
+    group_id: str | None
+    group_name: str
+    is_global: bool
+    approved_by: str
+    approved_at: datetime
+    active: bool
+    notes: str | None
+
+    class Config:
+        from_attributes = True
+
+
+class UpdateStatusGroup(BaseModel):
+    group_id: str | None
+    group_name: str
+    group_color: str | None
+    approved_version: str | None
+    agent_count: int
+    versions: dict[str, int]  # version -> count
+
+
+class UpdateStatusOut(BaseModel):
+    latest_version: str
+    groups: list[UpdateStatusGroup]
+
+
 # ---------- Software Inventory ----------
 
 class SoftwareItemIn(BaseModel):

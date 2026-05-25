@@ -294,6 +294,32 @@ class AlertEvent(Base):
     agent: Mapped["Agent"] = relationship()
 
 
+class UpdateApproval(Base):
+    """Aprovação de versão do agente por grupo — equivalente ao WSUS."""
+    __tablename__ = "update_approvals"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4())
+    )
+    version: Mapped[str] = mapped_column(String(50))
+    # null + is_global=False → Sem Grupo; is_global=True → todos os agentes
+    group_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("groups.id", ondelete="CASCADE"), index=True
+    )
+    is_global: Mapped[bool] = mapped_column(Boolean, default=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+    approved_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    approved_by_user_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id")
+    )
+
+    group: Mapped["Group | None"] = relationship(foreign_keys=[group_id])
+    approved_by: Mapped["User"] = relationship(foreign_keys=[approved_by_user_id])
+
+
 class SoftwareItem(Base):
     __tablename__ = "software_items"
 

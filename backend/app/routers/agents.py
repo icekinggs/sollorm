@@ -8,13 +8,7 @@ from sqlalchemy.orm import selectinload
 from app.auth import AgentAuthResult, get_current_user, verify_agent_token
 from app.config import settings
 from app.database import get_db
-from app.models import Agent, AgentToken, Group, Heartbeat, User
-from app.version import get_latest_version
-
-
-def _get_command_manager():
-    from app.routers.script_executions import manager
-    return manager
+from app.models import Agent, AgentToken, Group, Heartbeat, UpdateApproval, User
 from app.schemas import (
     AgentOut,
     HeartbeatIn,
@@ -22,13 +16,35 @@ from app.schemas import (
     StatusResponse,
     SystemInfoIn,
 )
+from app.version import get_latest_version
+
+
+def _get_command_manager():
+    from app.routers.script_executions import manager
+    return manager
+
+
+def _compute_approved_version(group_id: str | None, approvals: list) -> str | None:
+    group_ap = None
+    global_ap = None
+    for ap in approvals:
+        if not ap.active:
+            continue
+        if ap.is_global:
+            global_ap = ap
+        elif ap.group_id == group_id:
+            group_ap = ap
+        elif ap.group_id is None and group_id is None:
+            group_ap = ap
+    result = group_ap or global_ap
+    return result.version if result else None
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
 ONLINE_THRESHOLD_SECONDS = 120
 
 
-def _build_agent_out(agent: Agent, now: datetime) -> AgentOut:
+def _build_agent_out(agent: Agent, now: datetime, approved_version: str | None = None) -> AgentOut:
     threshold = now - timedelta(seconds=ONLINE_THRESHOLD_SECONDS)
 
     last_seen_aware = agent.last_seen
@@ -63,7 +79,8 @@ def _build_agent_out(agent: Agent, now: datetime) -> AgentOut:
         group_name=agent.group.name if agent.group else None,
         update_available=bool(
             agent.agent_version
-            and agent.agent_version != get_latest_version()
+            and approved_version
+            and agent.agent_version != approved_version
         ),
     )
 
@@ -187,6 +204,13 @@ async def receive_heartbeat(
         "disk_usage_percent": payload.disk_usage_percent,
     })
 
+    from app.routers.updates import check_and_push_on_heartbeat  # lazy
+    await check_and_push_on_heartbeat(
+        payload.agent_id,
+        agent.agent_version or "",
+        agent.group_id,
+    )
+
     return StatusResponse(message="heartbeat recebido")
 
 
@@ -209,7 +233,16 @@ async def list_agents(
     result = await db.execute(query)
     agents = result.scalars().all()
     now = datetime.now(timezone.utc)
-    return [_build_agent_out(agent, now) for agent in agents]
+
+    approvals_res = await db.execute(
+        select(UpdateApproval).where(UpdateApproval.active == True)
+    )
+    approvals = list(approvals_res.scalars().all())
+
+    return [
+        _build_agent_out(agent, now, _compute_approved_version(agent.group_id, approvals))
+        for agent in agents
+    ]
 
 
 @router.get("/{agent_id}", response_model=AgentOut)
@@ -230,7 +263,12 @@ async def get_agent(
             status_code=status.HTTP_404_NOT_FOUND, detail="Agente não encontrado"
         )
 
-    return _build_agent_out(agent, datetime.now(timezone.utc))
+    approvals_res = await db.execute(
+        select(UpdateApproval).where(UpdateApproval.active == True)
+    )
+    approvals = list(approvals_res.scalars().all())
+
+    return _build_agent_out(agent, datetime.now(timezone.utc), _compute_approved_version(agent.group_id, approvals))
 
 
 @router.get("/{agent_id}/heartbeats", response_model=list[HeartbeatOut])
