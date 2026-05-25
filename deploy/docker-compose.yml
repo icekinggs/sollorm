@@ -32,21 +32,10 @@ services:
       timeout: 5s
       retries: 5
 
-  meshcentral:
-    image: ghcr.io/ylianst/meshcentral:latest
-    container_name: sollorm-meshcentral
+  guacd:
+    image: guacamole/guacd:latest
+    container_name: sollorm-guacd
     restart: unless-stopped
-    environment:
-      - DYNAMIC_CONFIG=false
-    volumes:
-      - sollorm_meshcentral_data:/opt/meshcentral/meshcentral-data
-      - ./meshcentral-config.json:/opt/meshcentral/meshcentral-data/config.json:ro
-      - sollorm_meshcentral_files:/opt/meshcentral/meshcentral-files
-      - sollorm_meshcentral_web:/opt/meshcentral/meshcentral-web
-      - sollorm_meshcentral_backups:/opt/meshcentral/meshcentral-backups
-    ports:
-      - "8086:80"
-      - "8443:443"
 
   backend:
     build:
@@ -59,6 +48,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      guacd:
+        condition: service_started
     environment:
       DATABASE_URL: postgresql+asyncpg://sollorm:${POSTGRES_PASSWORD:-sollorm_dev_change_me}@db:5432/sollorm
       REDIS_URL: redis://redis:6379/0
@@ -66,11 +57,10 @@ services:
       AGENT_MASTER_TOKEN: ${AGENT_MASTER_TOKEN:-mude_este_token_imediatamente}
       PUBLIC_BACKEND_URL: ${PUBLIC_BACKEND_URL:-http://localhost:8000}
       GITHUB_REPO: ${GITHUB_REPO:-icekinggs/sollorm}
-      AGENT_CURRENT_VERSION: ${AGENT_CURRENT_VERSION:-v0.5.0}
+      AGENT_CURRENT_VERSION: ${AGENT_CURRENT_VERSION:-v0.6.0}
       ALLOW_LEGACY_MASTER_TOKEN: ${ALLOW_LEGACY_MASTER_TOKEN:-true}
-      MESHCENTRAL_PUBLIC_URL: ${MESHCENTRAL_PUBLIC_URL:-https://localhost:8443}
-      MESHCENTRAL_AGENT_LINUX_URL: ${MESHCENTRAL_AGENT_LINUX_URL:-}
-      MESHCENTRAL_AGENT_WINDOWS_URL: ${MESHCENTRAL_AGENT_WINDOWS_URL:-}
+      GUACD_HOST: guacd
+      GUACD_PORT: 4822
     ports:
       - "8000:8000"
 
@@ -93,7 +83,3 @@ services:
 volumes:
   sollorm_db_data:
   sollorm_redis_data:
-  sollorm_meshcentral_data:
-  sollorm_meshcentral_files:
-  sollorm_meshcentral_web:
-  sollorm_meshcentral_backups:
