@@ -39,5 +39,9 @@ export const agentsApi = {
 
   patchInstallAll(id) {
     return api.post(`/agents/${id}/patches/install-all`)
+  },
+
+  update(id) {
+    return api.post(`/agents/${id}/update`)
   }
 }

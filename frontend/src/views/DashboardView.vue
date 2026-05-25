@@ -260,6 +260,9 @@ onMounted(() => { load() })
           <div class="col-host">
             <span class="hostname">{{ agent.hostname }}</span>
             <span class="agent-ver" v-if="agent.agent_version">v{{ agent.agent_version }}</span>
+            <span v-if="agent.update_available" class="update-badge" title="Atualização disponível">
+              <i class="pi pi-arrow-circle-up" />
+            </span>
             <span v-if="agentAlertSeverity(agent.id) === 'critical'" class="alert-badge critical" title="Alerta crítico ativo">
               <i class="pi pi-times-circle" />
             </span>
@@ -655,6 +658,14 @@ onMounted(() => { load() })
 
 .alert-badge.critical { color: var(--p-red-500); }
 .alert-badge.warning  { color: var(--p-yellow-500, #f59e0b); }
+
+.update-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.72rem;
+  color: var(--p-blue-400, #60a5fa);
+  flex-shrink: 0;
+}
 
 .arrow {
   font-size: 0.75rem;

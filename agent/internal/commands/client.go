@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -155,10 +156,43 @@ func (c *Client) connectAndServe(ctx context.Context) error {
 			json.Unmarshal(data, &cmd)
 			c.remoteSession.InjectKey(cmd.Code, cmd.Event)
 
+		case "update_agent":
+			var cmd struct {
+				Version     string `json:"version"`
+				DownloadURL string `json:"download_url"`
+			}
+			json.Unmarshal(data, &cmd)
+			go c.handleAgentUpdate(cmd.Version, cmd.DownloadURL, safeSend)
+
 		default:
 			log.Printf("Tipo de comando desconhecido: %q", base.Type)
 		}
 	}
+}
+
+func (c *Client) handleAgentUpdate(version, downloadURL string, send func(any) error) {
+	log.Printf("Auto-atualização para %s iniciada (url: %s)", version, downloadURL)
+	_ = send(map[string]any{
+		"type": "update_progress", "agent_id": c.agentID,
+		"status": "downloading", "version": version,
+	})
+
+	if err := SelfUpdate(downloadURL); err != nil {
+		log.Printf("Falha na auto-atualização: %v", err)
+		_ = send(map[string]any{
+			"type": "update_progress", "agent_id": c.agentID,
+			"status": "failed", "error": err.Error(),
+		})
+		return
+	}
+
+	log.Printf("Binário atualizado. Reiniciando...")
+	_ = send(map[string]any{
+		"type": "update_progress", "agent_id": c.agentID,
+		"status": "restarting", "version": version,
+	})
+	time.Sleep(300 * time.Millisecond)
+	os.Exit(0) // service manager (systemd/kardianos) reinicia com o novo binário
 }
 
 // handlePatchScan executa o scan e reporta o resultado ao backend.

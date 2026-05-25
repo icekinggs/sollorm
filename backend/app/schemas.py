@@ -49,6 +49,7 @@ class AgentOut(BaseModel):
     remote_access_url: str | None = None
     group_id: str | None = None
     group_name: str | None = None
+    update_available: bool = False
 
     class Config:
         from_attributes = True

@@ -52,6 +52,7 @@ const softwareFilter = ref('')
 const loading = ref(true)
 const deleting = ref(false)
 const assigningGroup = ref(false)
+const updating = ref(false)
 const activeTab = ref('access')
 
 const agentFiringAlerts = computed(() => agentAlerts.value.filter(e => e.state === 'firing'))
@@ -98,20 +99,20 @@ const groupOptions = computed(() => [
 
 async function loadData() {
   try {
-    const [agentRes, hbRes, execRes, grpRes, alertRes, swRes] = await Promise.all([
+    const [agentRes, hbRes, execRes, grpRes, alertRes] = await Promise.all([
       agentsApi.get(props.id),
       agentsApi.heartbeats(props.id, 20),
       agentsApi.executions(props.id, 20),
       groupsApi.list(),
       alertsApi.listAgentEvents(props.id, { limit: 50 }),
-      softwareApi.list(props.id),
     ])
     agent.value = agentRes.data
     heartbeats.value = hbRes.data
     executions.value = execRes.data
     groups.value = grpRes.data
     agentAlerts.value = alertRes.data
-    softwareItems.value = swRes.data
+
+    softwareApi.list(props.id).then(r => { softwareItems.value = r.data }).catch(() => {})
   } catch (err) {
     if (err.response?.status === 404) {
       toast.add({ severity: 'error', summary: 'Não encontrado', detail: 'Agente não existe', life: 3000 })
@@ -143,6 +144,17 @@ async function assignGroup(groupId) {
     toast.add({ severity: 'error', summary: 'Erro', detail: err.response?.data?.detail || 'Falha ao atualizar grupo', life: 4000 })
   } finally {
     assigningGroup.value = false
+  }
+}
+
+async function triggerUpdate() {
+  updating.value = true
+  try {
+    await agentsApi.update(props.id)
+    toast.add({ severity: 'info', summary: 'Atualização iniciada', detail: 'O agente vai reiniciar após o download', life: 5000 })
+  } catch (err) {
+    toast.add({ severity: 'error', summary: 'Erro', detail: err.response?.data?.detail || 'Falha ao iniciar atualização', life: 4000 })
+    updating.value = false
   }
 }
 
@@ -203,6 +215,15 @@ useNotifications((msg) => {
   } else if (msg.type === 'alert_resolved') {
     const ev = agentAlerts.value.find(e => e.id === msg.event_id)
     if (ev) { ev.state = 'resolved'; ev.resolved_at = msg.resolved_at }
+  } else if (msg.type === 'update_progress' && msg.agent_id === props.id) {
+    if (msg.status === 'restarting') {
+      updating.value = false
+      if (agent.value) agent.value.update_available = false
+      toast.add({ severity: 'success', summary: 'Agente atualizado', detail: `v${msg.version} instalado — reiniciando`, life: 6000 })
+    } else if (msg.status === 'failed') {
+      updating.value = false
+      toast.add({ severity: 'error', summary: 'Falha na atualização', detail: msg.error || 'Erro desconhecido', life: 6000 })
+    }
   }
 })
 
@@ -244,6 +265,16 @@ onMounted(() => { loadData() })
           @change="assignGroup($event.value)"
         />
         <span class="version-badge" v-if="agent.agent_version">v{{ agent.agent_version }}</span>
+        <Button
+          v-if="agent.update_available"
+          icon="pi pi-arrow-circle-up"
+          label="Atualizar"
+          severity="warn"
+          size="small"
+          :loading="updating"
+          @click="triggerUpdate"
+          v-tooltip.left="'Nova versão disponível'"
+        />
         <Button icon="pi pi-trash" text rounded severity="danger" :loading="deleting" @click="handleDelete" />
       </div>
 

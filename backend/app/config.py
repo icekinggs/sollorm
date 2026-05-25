@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     github_repo: str = "icekinggs/sollorm"
 
     # Versão atual recomendada (atualize quando publicar nova release)
-    agent_current_version: str = "v0.5.4"
+    agent_current_version: str = "v0.6.0"
 
     # ---------- Guacamole / RDP ----------
     guacd_host: str = "guacd"
